@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Reprojection</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; background: #0d0d0d; overflow: hidden; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+canvas.dragging { cursor: grabbing; }
+
+#drop-zone {
+  position: fixed; inset: 0; z-index: 20;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #0d0d0d; color: #aaa;
+  font-family: 'Courier New', monospace;
+  cursor: pointer; user-select: none;
+  transition: background 0.15s;
+}
+#drop-zone.drag-over { background: #0d1a0d; }
+#drop-zone.hidden { display: none; }
+#drop-zone h1 { font-size: 1.6em; font-weight: normal; letter-spacing: 0.05em; color: #7af; margin-bottom: 0.5em; }
+#drop-zone p { color: #555; font-size: 0.85em; margin: 3px 0; }
+#drop-zone .hint { margin-top: 2em; color: #334; font-size: 0.78em; line-height: 2; text-align: center; }
+
+/* frame overlay – sized/positioned by JS */
+#frame-box {
+  position: fixed; pointer-events: none; z-index: 8;
+  border: 1px solid rgba(255,255,255,0.35);
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.28);
+  display: none;
+}
+
+.panel {
+  position: fixed; z-index: 10;
+  background: rgba(0,0,0,0.65);
+  font-family: 'Courier New', monospace; font-size: 12px;
+  color: #bbb; padding: 8px 12px; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.panel.hidden { display: none; }
+
+#hud  { bottom: 14px; left: 14px; line-height: 1.9; pointer-events: none; }
+#help { top: 14px; left: 14px; line-height: 1.9; pointer-events: none; }
+#ctrl { top: 14px; right: 14px; }
+
+#ctrl label { display: block; margin-bottom: 8px; color: #888; }
+#ctrl input[type=number] {
+  width: 68px; background: #181818; color: #ddd;
+  border: 1px solid #3a3a3a; padding: 3px 6px;
+  border-radius: 3px; font-family: inherit; font-size: 12px; margin-right: 2px;
+}
+.btn {
+  display: inline-block; padding: 3px 9px;
+  background: #1f1f1f; color: #bbb; border: 1px solid #3a3a3a;
+  border-radius: 3px; cursor: pointer;
+  font-family: 'Courier New', monospace; font-size: 12px;
+  margin-top: 4px; margin-right: 4px;
+}
+.btn:hover { background: #2a2a2a; }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="frame-box"></div>
+
+<div id="drop-zone">
+  <h1>Reprojection</h1>
+  <p>Drop an image here, or click to open</p>
+  <p>Focal length auto-detected from EXIF</p>
+  <div class="hint">
+    Arrow keys: pan &nbsp;|&nbsp; [ ] roll &nbsp;|&nbsp; scroll: zoom<br>
+    Mouse drag: pan &nbsp;|&nbsp; R: reset
+  </div>
+</div>
+
+<div id="help" class="panel hidden">
+  Arrow keys &nbsp; Pan<br>
+  [ ] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Roll<br>
+  Scroll / -= &nbsp; Zoom<br>
+  Drag mouse &nbsp; Pan<br>
+  R &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Reset
+</div>
+
+<div id="hud" class="panel hidden"></div>
+
+<div id="ctrl" class="panel hidden">
+  <label>
+    35mm equiv. focal length<br>
+    <input type="number" id="f35" min="4" max="2000" step="1" value="50">mm
+    <button class="btn" id="apply-btn">Apply</button>
+  </label>
+  <button class="btn" id="open-btn">Open image</button>
+  <button class="btn" id="reset-btn">Reset view</button>
+  <button class="btn" id="export-btn">Export frame</button>
+</div>
+
+<input type="file" id="file-in" accept="image/*" style="display:none">
+
+<script src="https://cdn.jsdelivr.net/npm/exifr@7/dist/lite.umd.js"></script>
+<script>
+'use strict';
+
+// ---- WebGL setup ------------------------------------------------------------
+const cv = document.getElementById('c');
+// preserveDrawingBuffer needed for toDataURL() export
+const gl = cv.getContext('webgl', { preserveDrawingBuffer: true })
+        || cv.getContext('experimental-webgl', { preserveDrawingBuffer: true });
+if (!gl) { alert('WebGL not supported'); }
+
+function resize() {
+  const dpr = devicePixelRatio || 1;
+  cv.width  = Math.round(window.innerWidth  * dpr);
+  cv.height = Math.round(window.innerHeight * dpr);
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+resize();
+window.addEventListener('resize', () => { resize(); draw(); updateFrame(); });
+
+// ---- Shaders ----------------------------------------------------------------
+// No Unicode characters in GLSL source (some drivers reject non-ASCII)
+const VS = 'attribute vec2 a; void main(){gl_Position=vec4(a,0.,1.);}';
+
+const FS = [
+  'precision highp float;',
+  'uniform sampler2D uTex;',
+  'uniform vec2  uRes;',  // canvas px
+  'uniform vec2  uImg;',  // image px
+  'uniform float uFS;',   // source focal length (image px)
+  'uniform float uFD;',   // dest focal length   (image px)
+  'uniform mat3  uR;',    // rotation matrix
+  'void main(){',
+  '  float sc = min(uRes.x/uImg.x, uRes.y/uImg.y);',
+  '  vec2 s = (gl_FragCoord.xy - uRes*0.5) / sc;',
+  '  vec3 ray = uR * vec3(s, uFD);',
+  '  if(ray.z <= 0.0){ gl_FragColor=vec4(0.06,0.06,0.06,1.); return; }',
+  '  vec2 hit = (uFS/ray.z)*ray.xy;',
+  '  vec2 uv  = hit/uImg + 0.5;',
+  '  if(uv.x<0.||uv.x>1.||uv.y<0.||uv.y>1.){ gl_FragColor=vec4(0.06,0.06,0.06,1.); return; }',
+  '  gl_FragColor = texture2D(uTex, uv);',
+  '}'
+].join('\n');
+
+function mkShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+    throw new Error('Shader error: ' + gl.getShaderInfoLog(s));
+  return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, mkShader(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, mkShader(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+  throw new Error('Link error: ' + gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aLoc = gl.getAttribLocation(prog, 'a');
+gl.enableVertexAttribArray(aLoc);
+gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
+
+const U = {};
+['uTex','uRes','uImg','uFS','uFD','uR'].forEach(n => { U[n] = gl.getUniformLocation(prog, n); });
+
+const tex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+// ---- State ------------------------------------------------------------------
+let loaded = false;
+let imgW = 1, imgH = 1;
+let fSrc = 1000, fDst = 1000;
+let yaw = 0, pitch = 0, roll = 0;
+
+const ROT_SPD  = Math.PI / 3;  // 60 deg/s for keys
+const ZOOM_SPD = Math.LN2;     // x2 or /2 per second
+
+function reset() { yaw = pitch = roll = 0; fDst = fSrc; }
+
+// R = Ry(yaw) * Rx(pitch) * Rz(roll), column-major flat for WebGL
+function rotMat(y, p, r) {
+  const cy=Math.cos(y), sy=Math.sin(y);
+  const cp=Math.cos(p), sp=Math.sin(p);
+  const cr=Math.cos(r), sr=Math.sin(r);
+  return new Float32Array([
+    cy*cr+sy*sp*sr,  cp*sr, -sy*cr+cy*sp*sr,   // col 0
+   -cy*sr+sy*sp*cr,  cp*cr,  sy*sr+cy*sp*cr,   // col 1
+    sy*cp,          -sp,     cy*cp              // col 2
+  ]);
+}
+
+function draw() {
+  if (!loaded) return;
+  gl.uniform2f(U.uRes, cv.width, cv.height);
+  gl.uniform2f(U.uImg, imgW, imgH);
+  gl.uniform1f(U.uFS, fSrc);
+  gl.uniform1f(U.uFD, fDst);
+  gl.uniformMatrix3fv(U.uR, false, rotMat(yaw, pitch, roll));
+  gl.uniform1i(U.uTex, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+function fmtDeg(v) { return (v * 180 / Math.PI).toFixed(1) + '°'; }
+
+function updateHUD() {
+  const f35eq = (fDst * 36 / Math.max(imgW, imgH)).toFixed(0);
+  document.getElementById('hud').innerHTML =
+    'Yaw: ' + fmtDeg(yaw) + ' &nbsp; Pitch: ' + fmtDeg(pitch) + ' &nbsp; Roll: ' + fmtDeg(roll) + '<br>' +
+    'Focal: ' + f35eq + 'mm equiv &nbsp;&#183;&nbsp; src: ' + Math.round(fSrc) + 'px';
+}
+
+// ---- Frame overlay ----------------------------------------------------------
+const frameEl = document.getElementById('frame-box');
+
+function updateFrame() {
+  if (!loaded) return;
+  const scale = Math.min(window.innerWidth / imgW, window.innerHeight / imgH);
+  const fw = imgW * scale;
+  const fh = imgH * scale;
+  frameEl.style.width  = fw + 'px';
+  frameEl.style.height = fh + 'px';
+  frameEl.style.left   = ((window.innerWidth  - fw) / 2) + 'px';
+  frameEl.style.top    = ((window.innerHeight - fh) / 2) + 'px';
+  frameEl.style.display = 'block';
+}
+
+// ---- Keyboard ---------------------------------------------------------------
+const held = new Set();
+
+document.addEventListener('keydown', e => {
+  held.add(e.key);
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','-','=','[',']'].includes(e.key))
+    e.preventDefault();
+  if (e.key === 'r' || e.key === 'R') { reset(); draw(); updateHUD(); }
+});
+document.addEventListener('keyup', e => held.delete(e.key));
+
+// ---- Mouse drag -------------------------------------------------------------
+let dragging = false, dragX = 0, dragY = 0;
+const MOUSE_SENS = 0.004; // radians per CSS pixel
+
+cv.addEventListener('mousedown', e => {
+  if (!loaded) return;
+  dragging = true; dragX = e.clientX; dragY = e.clientY;
+  cv.classList.add('dragging');
+});
+document.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - dragX;
+  const dy = e.clientY - dragY;
+  dragX = e.clientX; dragY = e.clientY;
+  yaw   -= dx * MOUSE_SENS;
+  pitch -= dy * MOUSE_SENS;
+  draw(); updateHUD();
+});
+document.addEventListener('mouseup', () => { dragging = false; cv.classList.remove('dragging'); });
+
+// ---- Scroll wheel -----------------------------------------------------------
+cv.addEventListener('wheel', e => {
+  if (!loaded) return;
+  e.preventDefault();
+  const ROLL_SENS = 0.003;  // radians per scroll pixel
+  const ZOOM_SENS = 0.001;
+  if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+    // Shift+scroll or horizontal scroll = roll
+    const delta = e.shiftKey ? e.deltaY : e.deltaX;
+    roll += delta * ROLL_SENS;
+  } else {
+    // Vertical scroll = zoom
+    fDst *= Math.exp(-e.deltaY * ZOOM_SENS);
+  }
+  draw(); updateHUD();
+}, { passive: false });
+
+// ---- Animation loop ---------------------------------------------------------
+let prevT = 0;
+(function loop(t) {
+  requestAnimationFrame(loop);
+  if (!loaded) { prevT = t; return; }
+
+  const dt = Math.min((t - prevT) / 1000, 0.1);
+  prevT = t;
+
+  let moved = false;
+
+  if (held.has('ArrowLeft'))  { yaw   -= ROT_SPD * dt; moved = true; }
+  if (held.has('ArrowRight')) { yaw   += ROT_SPD * dt; moved = true; }
+  if (held.has('ArrowUp'))    { pitch -= ROT_SPD * dt; moved = true; }
+  if (held.has('ArrowDown'))  { pitch += ROT_SPD * dt; moved = true; }
+  if (held.has('['))          { roll  -= ROT_SPD * dt; moved = true; }
+  if (held.has(']'))          { roll  += ROT_SPD * dt; moved = true; }
+  if (held.has('-'))          { fDst *= Math.exp(-ZOOM_SPD * dt); moved = true; }
+  if (held.has('='))          { fDst *= Math.exp( ZOOM_SPD * dt); moved = true; }
+
+  if (moved) { draw(); updateHUD(); }
+})();
+
+// ---- Export -----------------------------------------------------------------
+function exportFrame() {
+  if (!loaded) return;
+  const oldW = cv.width, oldH = cv.height;
+  cv.width = imgW; cv.height = imgH;
+  gl.viewport(0, 0, imgW, imgH);
+  draw();
+  const dataURL = cv.toDataURL('image/png');
+  // restore display
+  cv.width = oldW; cv.height = oldH;
+  gl.viewport(0, 0, oldW, oldH);
+  draw();
+  const a = document.createElement('a');
+  a.href = dataURL;
+  a.download = 'reprojected.png';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ---- Image loading ----------------------------------------------------------
+async function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+
+  let f35 = 50;
+  try {
+    if (typeof exifr !== 'undefined') {
+      const exif = await exifr.parse(file);
+      if (exif) {
+        const equiv = exif.FocalLengthIn35mmFilm
+                   || exif.FocalLengthIn35mmFormat
+                   || exif.FocalLength35efl;
+        if (equiv) {
+          f35 = equiv;
+        } else if (exif.FocalLength) {
+          f35 = exif.FocalLength * 1.5; // assume APS-C 1.5x crop
+        }
+      }
+    }
+  } catch (_) {}
+
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+
+  img.onload = () => {
+    imgW = img.naturalWidth;
+    imgH = img.naturalHeight;
+    // 35mm full-frame long side = 36mm
+    fSrc = f35 * Math.max(imgW, imgH) / 36;
+    fDst = fSrc;
+    yaw = pitch = roll = 0;
+
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    URL.revokeObjectURL(url);
+
+    loaded = true;
+    document.getElementById('drop-zone').classList.add('hidden');
+    ['hud','ctrl','help'].forEach(id =>
+      document.getElementById(id).classList.remove('hidden'));
+    document.getElementById('f35').value = Math.round(f35);
+    draw();
+    updateHUD();
+    updateFrame();
+  };
+  img.onerror = () => URL.revokeObjectURL(url);
+  img.src = url;
+}
+
+// ---- Drag & drop / file open ------------------------------------------------
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('click', () => document.getElementById('file-in').click());
+dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('drag-over');
+  loadFile(e.dataTransfer.files[0]);
+});
+document.getElementById('file-in').addEventListener('change', e => {
+  loadFile(e.target.files[0]); e.target.value = '';
+});
+
+// ---- Controls ---------------------------------------------------------------
+document.getElementById('open-btn').addEventListener('click', () =>
+  document.getElementById('file-in').click());
+document.getElementById('reset-btn').addEventListener('click', () =>
+  { reset(); draw(); updateHUD(); });
+document.getElementById('export-btn').addEventListener('click', exportFrame);
+document.getElementById('apply-btn').addEventListener('click', () => {
+  const f = parseFloat(document.getElementById('f35').value);
+  if (!f || f <= 0) return;
+  const ratio = fDst / fSrc;
+  fSrc = f * Math.max(imgW, imgH) / 36;
+  fDst = fSrc * ratio;
+  draw(); updateHUD();
+});
+</script>
+</body>
+</html>
