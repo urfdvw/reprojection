@@ -87,24 +87,24 @@ canvas.dragging { cursor: grabbing; }
   background: rgba(255,255,255,0.85);
   border-radius: 1px;
 }
-.frame-handle[data-dir="nw"] { width:14px;height:14px; top:-7px; left:-7px; cursor:move; background:#7af; border-radius:50%; box-shadow:0 0 0 2px rgba(0,0,0,0.5); }
-.frame-handle[data-dir="ne"] { width:10px;height:10px; top:-5px;  right:-5px;  cursor:ne-resize; }
-.frame-handle[data-dir="sw"] { width:10px;height:10px; bottom:-5px;left:-5px;  cursor:sw-resize; }
-.frame-handle[data-dir="se"] { width:10px;height:10px; bottom:-5px;right:-5px; cursor:se-resize; }
-.frame-handle[data-dir="n"]  { height:6px; left:25%; right:25%; top:-3px;    cursor:n-resize; }
-.frame-handle[data-dir="s"]  { height:6px; left:25%; right:25%; bottom:-3px; cursor:s-resize; }
-.frame-handle[data-dir="e"]  { width:6px;  top:25%; bottom:25%; right:-3px;  cursor:e-resize; }
-.frame-handle[data-dir="w"]  { width:6px;  top:25%; bottom:25%; left:-3px;   cursor:w-resize; }
+.frame-handle[data-dir="nw"] { width:14px;height:14px; top:0; left:0; cursor:move; background:#7af; border-radius:2px; box-shadow:0 0 0 2px rgba(0,0,0,0.5); }
+.frame-handle[data-dir="ne"] { width:10px;height:10px; top:0;    right:0;   cursor:ne-resize; }
+.frame-handle[data-dir="sw"] { width:10px;height:10px; bottom:0; left:0;    cursor:sw-resize; }
+.frame-handle[data-dir="se"] { width:10px;height:10px; bottom:0; right:0;   cursor:se-resize; }
+.frame-handle[data-dir="n"]  { height:6px; left:25%; right:25%; top:0;    cursor:n-resize; }
+.frame-handle[data-dir="s"]  { height:6px; left:25%; right:25%; bottom:0; cursor:s-resize; }
+.frame-handle[data-dir="e"]  { width:6px;  top:25%; bottom:25%; right:0;  cursor:e-resize; }
+.frame-handle[data-dir="w"]  { width:6px;  top:25%; bottom:25%; left:0;   cursor:w-resize; }
 
 /* Mobile: hide edge handles, enlarge corner handles */
 body.mobile .frame-handle[data-dir="n"],
 body.mobile .frame-handle[data-dir="s"],
 body.mobile .frame-handle[data-dir="e"],
 body.mobile .frame-handle[data-dir="w"] { display: none; }
-body.mobile .frame-handle[data-dir="nw"] { width:22px; height:22px; top:-11px; left:-11px; }
-body.mobile .frame-handle[data-dir="ne"] { width:22px; height:22px; top:-11px; right:-11px; }
-body.mobile .frame-handle[data-dir="sw"] { width:22px; height:22px; bottom:-11px; left:-11px; }
-body.mobile .frame-handle[data-dir="se"] { width:22px; height:22px; bottom:-11px; right:-11px; }
+body.mobile .frame-handle[data-dir="nw"] { width:44px; height:44px; top:0; left:0; }
+body.mobile .frame-handle[data-dir="ne"] { width:44px; height:44px; top:0; right:0; }
+body.mobile .frame-handle[data-dir="sw"] { width:44px; height:44px; bottom:0; left:0; }
+body.mobile .frame-handle[data-dir="se"] { width:44px; height:44px; bottom:0; right:0; }
 
 body.mobile #drop-zone .hint,
 body.mobile #help,
