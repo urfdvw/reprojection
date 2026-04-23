@@ -7,7 +7,7 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; background: #0d0d0d; overflow: hidden; }
-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 canvas.dragging { cursor: grabbing; }
 
 #drop-zone {
@@ -63,6 +63,33 @@ canvas.dragging { cursor: grabbing; }
   margin-top: 4px; margin-right: 4px;
 }
 .btn:hover { background: #2a2a2a; }
+
+body.mobile #drop-zone .hint,
+body.mobile #help,
+body.mobile #hud {
+  display: none !important;
+}
+
+body.mobile #ctrl {
+  top: auto;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  width: auto;
+  max-width: none;
+}
+
+body.mobile #ctrl label {
+  margin-bottom: 10px;
+}
+
+body.mobile #ctrl input[type=number] {
+  width: 72px;
+}
+
+body.mobile .btn {
+  min-height: 32px;
+}
 </style>
 </head>
 <body>
@@ -205,8 +232,22 @@ let fisheyeK = 0;
 
 const ROT_SPD  = Math.PI / 3;  // 60 deg/s for keys
 const ZOOM_SPD = Math.LN2;     // x2 or /2 per second
+const MOBILE_QUERY = '(max-width: 768px)';
+const TOUCH_PAN_SENS = 0.004;
 
 function reset() { yaw = pitch = roll = 0; fDst = fSrc; }
+
+function isMobileScreen() {
+  return window.matchMedia(MOBILE_QUERY).matches;
+}
+
+function syncMobileUI() {
+  document.body.classList.toggle('mobile', isMobileScreen());
+}
+
+syncMobileUI();
+window.addEventListener('resize', syncMobileUI);
+window.matchMedia(MOBILE_QUERY).addEventListener('change', syncMobileUI);
 
 // R = Ry(yaw) * Rx(pitch) * Rz(roll), column-major flat for WebGL
 function rotMat(y, p, r) {
@@ -288,6 +329,88 @@ document.addEventListener('mousemove', e => {
   draw(); updateHUD();
 });
 document.addEventListener('mouseup', () => { dragging = false; cv.classList.remove('dragging'); });
+
+// ---- Touch gestures --------------------------------------------------------
+let touchMode = null;
+let touchX = 0, touchY = 0;
+let touchDistance = 0, touchAngle = 0;
+
+function getTouchDistance(a, b) {
+  return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+}
+
+function getTouchAngle(a, b) {
+  return Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
+}
+
+cv.addEventListener('touchstart', e => {
+  if (!loaded) return;
+
+  if (e.touches.length === 1) {
+    const touch = e.touches[0];
+    touchMode = 'pan';
+    touchX = touch.clientX;
+    touchY = touch.clientY;
+    return;
+  }
+
+  if (e.touches.length >= 2) {
+    touchMode = 'gesture';
+    touchDistance = getTouchDistance(e.touches[0], e.touches[1]);
+    touchAngle = getTouchAngle(e.touches[0], e.touches[1]);
+  }
+}, { passive: true });
+
+cv.addEventListener('touchmove', e => {
+  if (!loaded) return;
+
+  if (touchMode === 'pan' && e.touches.length === 1) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchX;
+    const dy = touch.clientY - touchY;
+    touchX = touch.clientX;
+    touchY = touch.clientY;
+    yaw -= dx * TOUCH_PAN_SENS;
+    pitch -= dy * TOUCH_PAN_SENS;
+    draw(); updateHUD();
+    return;
+  }
+
+  if (e.touches.length >= 2) {
+    e.preventDefault();
+    const nextDistance = getTouchDistance(e.touches[0], e.touches[1]);
+    const nextAngle = getTouchAngle(e.touches[0], e.touches[1]);
+
+    if (touchDistance > 0 && nextDistance > 0) {
+      fDst *= nextDistance / touchDistance;
+    }
+    roll += nextAngle - touchAngle;
+    touchMode = 'gesture';
+    touchDistance = nextDistance;
+    touchAngle = nextAngle;
+    draw(); updateHUD();
+  }
+}, { passive: false });
+
+cv.addEventListener('touchend', e => {
+  if (e.touches.length >= 2) {
+    touchMode = 'gesture';
+    touchDistance = getTouchDistance(e.touches[0], e.touches[1]);
+    touchAngle = getTouchAngle(e.touches[0], e.touches[1]);
+    return;
+  }
+
+  if (e.touches.length === 1) {
+    const touch = e.touches[0];
+    touchMode = 'pan';
+    touchX = touch.clientX;
+    touchY = touch.clientY;
+    return;
+  }
+
+  touchMode = null;
+}, { passive: true });
 
 // ---- Scroll wheel -----------------------------------------------------------
 cv.addEventListener('wheel', e => {
