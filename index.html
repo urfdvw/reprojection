@@ -64,6 +64,29 @@ canvas.dragging { cursor: grabbing; }
 }
 .btn:hover { background: #2a2a2a; }
 
+/* ---- Frame resize handles ---- */
+.frame-handle {
+  position: absolute;
+  pointer-events: auto;
+  background: rgba(255,255,255,0.85);
+  border-radius: 1px;
+}
+.frame-handle[data-dir="nw"] { width:14px;height:14px; top:-7px; left:-7px; cursor:move; background:#7af; border-radius:50%; box-shadow:0 0 0 2px rgba(0,0,0,0.5); }
+.frame-handle[data-dir="ne"] { width:10px;height:10px; top:-5px;  right:-5px;  cursor:ne-resize; }
+.frame-handle[data-dir="sw"] { width:10px;height:10px; bottom:-5px;left:-5px;  cursor:sw-resize; }
+.frame-handle[data-dir="se"] { width:10px;height:10px; bottom:-5px;right:-5px; cursor:se-resize; }
+.frame-handle[data-dir="n"]  { height:6px; left:25%; right:25%; top:-3px;    cursor:n-resize; }
+.frame-handle[data-dir="s"]  { height:6px; left:25%; right:25%; bottom:-3px; cursor:s-resize; }
+.frame-handle[data-dir="e"]  { width:6px;  top:25%; bottom:25%; right:-3px;  cursor:e-resize; }
+.frame-handle[data-dir="w"]  { width:6px;  top:25%; bottom:25%; left:-3px;   cursor:w-resize; }
+
+#ctrl select {
+  background: #181818; color: #ddd;
+  border: 1px solid #3a3a3a; padding: 3px 6px;
+  border-radius: 3px; font-family: inherit; font-size: 12px;
+  width: 100%; margin-top: 2px; cursor: pointer;
+}
+
 body.mobile #drop-zone .hint,
 body.mobile #help,
 body.mobile #hud {
@@ -95,7 +118,16 @@ body.mobile .btn {
 <body>
 
 <canvas id="c"></canvas>
-<div id="frame-box"></div>
+<div id="frame-box">
+  <div class="frame-handle" data-dir="n"></div>
+  <div class="frame-handle" data-dir="s"></div>
+  <div class="frame-handle" data-dir="e"></div>
+  <div class="frame-handle" data-dir="w"></div>
+  <div class="frame-handle" data-dir="nw"></div>
+  <div class="frame-handle" data-dir="ne"></div>
+  <div class="frame-handle" data-dir="sw"></div>
+  <div class="frame-handle" data-dir="se"></div>
+</div>
 
 <div id="drop-zone">
   <h1>Reprojection</h1>
@@ -129,6 +161,29 @@ body.mobile .btn {
       <span>Perspective</span><span>Equidistant</span>
     </span>
     <input type="range" id="fisheye-k" min="0" max="1" step="0.01" value="0">
+  </label>
+  <label style="display:block;margin-bottom:8px;color:#888">
+    Export ratio<br>
+    <select id="frame-ratio">
+      <option value="original">Original</option>
+      <option value="freeform">Free form</option>
+      <option value="1:1">1:1 Square</option>
+      <optgroup label="Landscape">
+        <option value="16:9">16:9</option>
+        <option value="4:3">4:3</option>
+        <option value="3:2">3:2</option>
+        <option value="5:4">5:4</option>
+        <option value="21:9">21:9 Ultrawide</option>
+        <option value="2.39:1">2.39:1 Cinema</option>
+      </optgroup>
+      <optgroup label="Portrait">
+        <option value="9:16">9:16</option>
+        <option value="3:4">3:4</option>
+        <option value="2:3">2:3</option>
+        <option value="4:5">4:5</option>
+        <option value="9:21">9:21 Tall</option>
+      </optgroup>
+    </select>
   </label>
   <button class="btn" id="open-btn">Open image</button>
   <button class="btn" id="reset-btn">Reset view</button>
@@ -170,9 +225,11 @@ const FS = [
   'uniform float uFD;',   // dest focal length   (image px)
   'uniform float uK;',    // fisheye blend: 0=perspective, 1=equidistant
   'uniform mat3  uR;',    // rotation matrix
+  'uniform float uSC;',   // canvas px per image px (overrides auto)
+  'uniform vec2  uCenter;', // viewport center offset in image px
   'void main(){',
-  '  float sc = min(uRes.x/uImg.x, uRes.y/uImg.y);',
-  '  vec2 s = (gl_FragCoord.xy - uRes*0.5) / sc;',
+  '  float sc = uSC;',
+  '  vec2 s = (gl_FragCoord.xy - uRes*0.5) / sc + uCenter;',
   '  float r = length(s);',
   '  vec3 dir;',
   '  if(r < 0.0001){',
@@ -214,7 +271,7 @@ gl.enableVertexAttribArray(aLoc);
 gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
 
 const U = {};
-['uTex','uRes','uImg','uFS','uFD','uK','uR'].forEach(n => { U[n] = gl.getUniformLocation(prog, n); });
+['uTex','uRes','uImg','uFS','uFD','uK','uR','uSC','uCenter'].forEach(n => { U[n] = gl.getUniformLocation(prog, n); });
 
 const tex = gl.createTexture();
 gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -229,6 +286,10 @@ let imgW = 1, imgH = 1;
 let fSrc = 1000, fDst = 1000;
 let yaw = 0, pitch = 0, roll = 0;
 let fisheyeK = 0;
+let frameX = 0, frameY = 0, frameW = 0, frameH = 0;
+let frameResizing = false, resizeHandle = '';
+let frameMoving = false;
+let resizeStartX = 0, resizeStartY = 0, resizeStartFX = 0, resizeStartFY = 0, resizeStartW = 0, resizeStartH = 0;
 
 const ROT_SPD  = Math.PI / 3;  // 60 deg/s for keys
 const ZOOM_SPD = Math.LN2;     // x2 or /2 per second
@@ -269,6 +330,8 @@ function draw() {
   gl.uniform1f(U.uFD, fDst);
   gl.uniform1f(U.uK, fisheyeK);
   gl.uniformMatrix3fv(U.uR, false, rotMat(yaw, pitch, roll));
+  gl.uniform1f(U.uSC, Math.min(cv.width / imgW, cv.height / imgH));
+  gl.uniform2f(U.uCenter, 0, 0);
   gl.uniform1i(U.uTex, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
@@ -278,25 +341,142 @@ function fmtDeg(v) { return (v * 180 / Math.PI).toFixed(1) + '°'; }
 function updateHUD() {
   const f35eq = (fDst * 36 / Math.max(imgW, imgH)).toFixed(0);
   const projLabel = fisheyeK === 0 ? 'Perspective' : fisheyeK === 1 ? 'Equidistant' : 'Fisheye ' + Math.round(fisheyeK * 100) + '%';
+  const minPx = Math.min(imgW, imgH);
+  const expW = frameW <= frameH ? minPx : Math.round(minPx * frameW / frameH);
+  const expH = frameW <= frameH ? Math.round(minPx * frameH / frameW) : minPx;
   document.getElementById('hud').innerHTML =
     'Yaw: ' + fmtDeg(yaw) + ' &nbsp; Pitch: ' + fmtDeg(pitch) + ' &nbsp; Roll: ' + fmtDeg(roll) + '<br>' +
     'Focal: ' + f35eq + 'mm equiv &nbsp;&#183;&nbsp; src: ' + Math.round(fSrc) + 'px' + '<br>' +
-    'Projection: ' + projLabel;
+    'Projection: ' + projLabel + '<br>' +
+    'Export: ' + expW + ' &#215; ' + expH + 'px';
 }
 
 // ---- Frame overlay ----------------------------------------------------------
 const frameEl = document.getElementById('frame-box');
 
+function positionFrame() {
+  frameEl.style.width   = frameW + 'px';
+  frameEl.style.height  = frameH + 'px';
+  frameEl.style.left    = frameX + 'px';
+  frameEl.style.top     = frameY + 'px';
+  frameEl.style.display = 'block';
+}
+
+function getTargetRatio() {
+  const sel = document.getElementById('frame-ratio').value;
+  if (sel === 'original') return imgW / imgH;
+  if (sel === 'freeform')  return 0;
+  const parts = sel.split(':');
+  return parts.length === 2 ? parseFloat(parts[0]) / parseFloat(parts[1]) : 0;
+}
+
+function applyRatioSnap() {
+  if (!loaded) return;
+  const sel = document.getElementById('frame-ratio').value;
+  const ww = window.innerWidth, wh = window.innerHeight;
+  if (sel === 'original') {
+    const scale = Math.min(ww / imgW, wh / imgH);
+    frameW = imgW * scale;
+    frameH = imgH * scale;
+  } else {
+    const ratio = getTargetRatio();
+    if (ratio <= 0) return; // freeform – keep current size
+    const maxW = ww - 4, maxH = wh - 4;
+    if (frameW / frameH > ratio) {
+      frameH = frameW / ratio;
+      if (frameH > maxH) { frameH = maxH; frameW = frameH * ratio; }
+    } else {
+      frameW = frameH * ratio;
+      if (frameW > maxW) { frameW = maxW; frameH = frameW / ratio; }
+    }
+  }
+  // re-center after snap
+  frameX = (ww - frameW) / 2;
+  frameY = (wh - frameH) / 2;
+}
+
+function applyFrameResize(dx, dy) {
+  const ratio = getTargetRatio();
+  const h = resizeHandle;
+  const MIN = 20;
+
+  // Which edges are moving?
+  const mR = h === 'e'  || h === 'se' || h === 'ne';
+  const mL = h === 'w'  || h === 'sw' || h === 'nw';
+  const mB = h === 's'  || h === 'se' || h === 'sw';
+  const mT = h === 'n'  || h === 'ne' || h === 'nw';
+
+  // Raw new size from dragging only this handle
+  let newW = Math.max(MIN, resizeStartW + (mR ? dx : mL ? -dx : 0));
+  let newH = Math.max(MIN, resizeStartH + (mB ? dy : mT ? -dy : 0));
+
+  // Apply ratio constraint
+  if (ratio > 0) {
+    const isCorner = (mR || mL) && (mT || mB);
+    if (!isCorner && (mR || mL)) {
+      // horizontal-only edge: width drives, height follows, center vertically
+      newH = newW / ratio;
+    } else if (!isCorner && (mT || mB)) {
+      // vertical-only edge: height drives, width follows, center horizontally
+      newW = newH * ratio;
+    } else {
+      // corner: dominant axis wins
+      if (Math.abs(dx) >= Math.abs(dy)) newH = newW / ratio;
+      else                               newW = newH * ratio;
+      newW = Math.max(MIN, newW);
+      newH = Math.max(MIN, newH);
+    }
+  }
+
+  // Fixed-edge anchors (the edges that don't move)
+  const fixedRight  = resizeStartFX + resizeStartW;
+  const fixedBottom = resizeStartFY + resizeStartH;
+
+  // Compute new top-left
+  let newX = mL ? fixedRight - newW : resizeStartFX;
+  let newY = mT ? fixedBottom - newH : resizeStartFY;
+
+  // For single-axis edge+ratio drags, center on the perpendicular axis
+  if (ratio > 0 && !((mR || mL) && (mT || mB))) {
+    if (mR || mL) newY = resizeStartFY + (resizeStartH - newH) / 2;
+    if (mT || mB) newX = resizeStartFX + (resizeStartW - newW) / 2;
+  }
+
+  frameX = newX;
+  frameY = newY;
+  frameW = newW;
+  frameH = newH;
+  clampFrame();
+  positionFrame();
+  updateHUD();
+}
+
+function clampFrame() {
+  const ww = window.innerWidth, wh = window.innerHeight;
+  const PAD = 7; // handle half-size
+  frameX = Math.max(PAD, Math.min(ww - frameW - PAD, frameX));
+  frameY = Math.max(PAD, Math.min(wh - frameH - PAD, frameY));
+}
+
 function updateFrame() {
   if (!loaded) return;
-  const scale = Math.min(window.innerWidth / imgW, window.innerHeight / imgH);
-  const fw = imgW * scale;
-  const fh = imgH * scale;
-  frameEl.style.width  = fw + 'px';
-  frameEl.style.height = fh + 'px';
-  frameEl.style.left   = ((window.innerWidth  - fw) / 2) + 'px';
-  frameEl.style.top    = ((window.innerHeight - fh) / 2) + 'px';
-  frameEl.style.display = 'block';
+  const ww = window.innerWidth, wh = window.innerHeight;
+  if (frameW === 0) {
+    const scale = Math.min(ww / imgW, wh / imgH);
+    frameW = imgW * scale;
+    frameH = imgH * scale;
+    frameX = (ww - frameW) / 2;
+    frameY = (wh - frameH) / 2;
+  } else {
+    // On window resize: clamp so frame stays visible
+    const s = Math.min((ww - 4) / frameW, (wh - 4) / frameH);
+    if (s < 1) {
+      frameW *= s; frameH *= s;
+      frameX = (ww - frameW) / 2;
+      frameY = (wh - frameH) / 2;
+    }
+  }
+  positionFrame();
 }
 
 // ---- Keyboard ---------------------------------------------------------------
@@ -320,6 +500,18 @@ cv.addEventListener('mousedown', e => {
   cv.classList.add('dragging');
 });
 document.addEventListener('mousemove', e => {
+  if (frameMoving) {
+    frameX = resizeStartFX + (e.clientX - resizeStartX);
+    frameY = resizeStartFY + (e.clientY - resizeStartY);
+    clampFrame();
+    positionFrame();
+    updateHUD();
+    return;
+  }
+  if (frameResizing) {
+    applyFrameResize(e.clientX - resizeStartX, e.clientY - resizeStartY);
+    return;
+  }
   if (!dragging) return;
   const dx = e.clientX - dragX;
   const dy = e.clientY - dragY;
@@ -328,7 +520,13 @@ document.addEventListener('mousemove', e => {
   pitch -= dy * MOUSE_SENS;
   draw(); updateHUD();
 });
-document.addEventListener('mouseup', () => { dragging = false; cv.classList.remove('dragging'); });
+document.addEventListener('mouseup', () => {
+  dragging = false;
+  frameResizing = false;
+  frameMoving = false;
+  cv.classList.remove('dragging');
+  document.body.style.cursor = '';
+});
 
 // ---- Touch gestures --------------------------------------------------------
 let touchMode = null;
@@ -460,15 +658,49 @@ let prevT = 0;
 // ---- Export -----------------------------------------------------------------
 function exportFrame() {
   if (!loaded) return;
+  const ww = window.innerWidth, wh = window.innerHeight;
+
+  // Scale: CSS px per image px on screen
+  const imgScale = Math.min(ww / imgW, wh / imgH);
+
+  // Frame size in image-coordinate space
+  const fw_img = frameW / imgScale;
+  const fh_img = frameH / imgScale;
+
+  // Export pixel dimensions: short edge = min(imgW, imgH)
+  const minPx = Math.min(imgW, imgH);
+  const exportW = frameW <= frameH ? minPx : Math.round(minPx * frameW / frameH);
+  const exportH = frameW <= frameH ? Math.round(minPx * frameH / frameW) : minPx;
+
+  // Export scale: export pixels per image pixel
+  const sc_export = exportW / fw_img;
+
+  // Frame center offset from screen centre in CSS px (Y flipped for WebGL)
+  const cx_img = (frameX + frameW / 2 - ww / 2) / imgScale;
+  const cy_img = (wh / 2 - frameY - frameH / 2) / imgScale;
+
+  // Render the exact frame viewport at export resolution
   const oldW = cv.width, oldH = cv.height;
-  cv.width = imgW; cv.height = imgH;
-  gl.viewport(0, 0, imgW, imgH);
-  draw();
+  cv.width = exportW; cv.height = exportH;
+  gl.viewport(0, 0, exportW, exportH);
+  gl.uniform2f(U.uRes, exportW, exportH);
+  gl.uniform2f(U.uImg, imgW, imgH);
+  gl.uniform1f(U.uFS, fSrc);
+  gl.uniform1f(U.uFD, fDst);
+  gl.uniform1f(U.uK, fisheyeK);
+  gl.uniformMatrix3fv(U.uR, false, rotMat(yaw, pitch, roll));
+  gl.uniform1f(U.uSC, sc_export);
+  gl.uniform2f(U.uCenter, cx_img, cy_img);
+  gl.uniform1i(U.uTex, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
   const dataURL = cv.toDataURL('image/png');
-  // restore display
+
+  // Restore display canvas
   cv.width = oldW; cv.height = oldH;
   gl.viewport(0, 0, oldW, oldH);
   draw();
+
   const a = document.createElement('a');
   a.href = dataURL;
   a.download = 'reprojected.png';
@@ -558,6 +790,69 @@ document.getElementById('fisheye-k').addEventListener('input', e => {
   fisheyeK = parseFloat(e.target.value);
   draw(); updateHUD();
 });
+document.getElementById('frame-ratio').addEventListener('change', () => {
+  applyRatioSnap();
+  positionFrame();
+  updateHUD();
+});
+
+// ---- Frame resize handles ---------------------------------------------------
+document.querySelectorAll('.frame-handle').forEach(handle => {
+  handle.addEventListener('mousedown', e => {
+    if (!loaded) return;
+    e.stopPropagation();
+    e.preventDefault();
+    resizeStartX  = e.clientX;
+    resizeStartY  = e.clientY;
+    resizeStartFX = frameX;
+    resizeStartFY = frameY;
+    resizeStartW  = frameW;
+    resizeStartH  = frameH;
+    if (handle.dataset.dir === 'nw') {
+      frameMoving = true;
+      document.body.style.cursor = 'move';
+    } else {
+      frameResizing = true;
+      resizeHandle  = handle.dataset.dir;
+      document.body.style.cursor = window.getComputedStyle(handle).cursor;
+    }
+  });
+  handle.addEventListener('touchstart', e => {
+    if (!loaded) return;
+    e.stopPropagation();
+    touchMode = null; // cancel any canvas gesture in progress
+    const t = e.touches[0];
+    resizeStartX  = t.clientX;
+    resizeStartY  = t.clientY;
+    resizeStartFX = frameX;
+    resizeStartFY = frameY;
+    resizeStartW  = frameW;
+    resizeStartH  = frameH;
+    if (handle.dataset.dir === 'nw') {
+      frameMoving = true;
+    } else {
+      frameResizing = true;
+      resizeHandle  = handle.dataset.dir;
+    }
+  }, { passive: true });
+});
+
+document.addEventListener('touchmove', e => {
+  if (!frameMoving && !frameResizing) return;
+  e.preventDefault();
+  const t = e.touches[0];
+  if (frameMoving) {
+    frameX = resizeStartFX + (t.clientX - resizeStartX);
+    frameY = resizeStartFY + (t.clientY - resizeStartY);
+    clampFrame();
+    positionFrame();
+    updateHUD();
+  } else {
+    applyFrameResize(t.clientX - resizeStartX, t.clientY - resizeStartY);
+  }
+}, { passive: false });
+
+document.addEventListener('touchend', () => { frameResizing = false; frameMoving = false; });
 </script>
 </body>
 </html>
