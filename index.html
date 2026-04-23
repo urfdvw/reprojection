@@ -158,8 +158,6 @@ body.mobile .btn {
 /* Center crosshair */
 #crosshair {
   position: fixed;
-  left: 50%;
-  top: calc((100vh - var(--ctrl-h, 0px)) / 2);
   transform: translate(-50%, -50%);
   width: 14px; height: 14px;
   pointer-events: none;
@@ -272,6 +270,10 @@ function resize() {
   cv.width  = Math.round(window.innerWidth  * dpr);
   cv.height = Math.round((window.innerHeight - ctrlH) * dpr);
   gl.viewport(0, 0, cv.width, cv.height);
+  // Position crosshair at exact centre of the canvas area
+  const ch = document.getElementById('crosshair');
+  ch.style.left = (window.innerWidth / 2) + 'px';
+  ch.style.top  = ((window.innerHeight - ctrlH) / 2) + 'px';
 }
 resize();
 window.addEventListener('resize', () => { resize(); draw(); updateFrame(); });
