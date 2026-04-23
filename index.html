@@ -51,6 +51,10 @@ canvas.dragging { cursor: grabbing; }
   border: 1px solid #3a3a3a; padding: 3px 6px;
   border-radius: 3px; font-family: inherit; font-size: 12px; margin-right: 2px;
 }
+#ctrl input[type=range] {
+  width: 100%; accent-color: #7af; margin: 4px 0;
+  cursor: pointer;
+}
 .btn {
   display: inline-block; padding: 3px 9px;
   background: #1f1f1f; color: #bbb; border: 1px solid #3a3a3a;
@@ -92,6 +96,13 @@ canvas.dragging { cursor: grabbing; }
     <input type="number" id="f35" min="4" max="2000" step="1" value="50">mm
     <button class="btn" id="apply-btn">Apply</button>
   </label>
+  <label style="display:block;margin-bottom:8px;color:#888">
+    Projection<br>
+    <span style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:2px">
+      <span>Perspective</span><span>Equidistant</span>
+    </span>
+    <input type="range" id="fisheye-k" min="0" max="1" step="0.01" value="0">
+  </label>
   <button class="btn" id="open-btn">Open image</button>
   <button class="btn" id="reset-btn">Reset view</button>
   <button class="btn" id="export-btn">Export frame</button>
@@ -130,11 +141,20 @@ const FS = [
   'uniform vec2  uImg;',  // image px
   'uniform float uFS;',   // source focal length (image px)
   'uniform float uFD;',   // dest focal length   (image px)
+  'uniform float uK;',    // fisheye blend: 0=perspective, 1=equidistant
   'uniform mat3  uR;',    // rotation matrix
   'void main(){',
   '  float sc = min(uRes.x/uImg.x, uRes.y/uImg.y);',
   '  vec2 s = (gl_FragCoord.xy - uRes*0.5) / sc;',
-  '  vec3 ray = uR * vec3(s, uFD);',
+  '  float r = length(s);',
+  '  vec3 dir;',
+  '  if(r < 0.0001){',
+  '    dir = vec3(0.0, 0.0, 1.0);',
+  '  } else {',
+  '    float theta = mix(atan(r / uFD), r / uFD, uK);',
+  '    dir = vec3((s / r) * sin(theta), cos(theta));',
+  '  }',
+  '  vec3 ray = uR * dir;',
   '  if(ray.z <= 0.0){ gl_FragColor=vec4(0.06,0.06,0.06,1.); return; }',
   '  vec2 hit = (uFS/ray.z)*ray.xy;',
   '  vec2 uv  = hit/uImg + 0.5;',
@@ -167,7 +187,7 @@ gl.enableVertexAttribArray(aLoc);
 gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
 
 const U = {};
-['uTex','uRes','uImg','uFS','uFD','uR'].forEach(n => { U[n] = gl.getUniformLocation(prog, n); });
+['uTex','uRes','uImg','uFS','uFD','uK','uR'].forEach(n => { U[n] = gl.getUniformLocation(prog, n); });
 
 const tex = gl.createTexture();
 gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -181,6 +201,7 @@ let loaded = false;
 let imgW = 1, imgH = 1;
 let fSrc = 1000, fDst = 1000;
 let yaw = 0, pitch = 0, roll = 0;
+let fisheyeK = 0;
 
 const ROT_SPD  = Math.PI / 3;  // 60 deg/s for keys
 const ZOOM_SPD = Math.LN2;     // x2 or /2 per second
@@ -205,6 +226,7 @@ function draw() {
   gl.uniform2f(U.uImg, imgW, imgH);
   gl.uniform1f(U.uFS, fSrc);
   gl.uniform1f(U.uFD, fDst);
+  gl.uniform1f(U.uK, fisheyeK);
   gl.uniformMatrix3fv(U.uR, false, rotMat(yaw, pitch, roll));
   gl.uniform1i(U.uTex, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -214,9 +236,11 @@ function fmtDeg(v) { return (v * 180 / Math.PI).toFixed(1) + '°'; }
 
 function updateHUD() {
   const f35eq = (fDst * 36 / Math.max(imgW, imgH)).toFixed(0);
+  const projLabel = fisheyeK === 0 ? 'Perspective' : fisheyeK === 1 ? 'Equidistant' : 'Fisheye ' + Math.round(fisheyeK * 100) + '%';
   document.getElementById('hud').innerHTML =
     'Yaw: ' + fmtDeg(yaw) + ' &nbsp; Pitch: ' + fmtDeg(pitch) + ' &nbsp; Roll: ' + fmtDeg(roll) + '<br>' +
-    'Focal: ' + f35eq + 'mm equiv &nbsp;&#183;&nbsp; src: ' + Math.round(fSrc) + 'px';
+    'Focal: ' + f35eq + 'mm equiv &nbsp;&#183;&nbsp; src: ' + Math.round(fSrc) + 'px' + '<br>' +
+    'Projection: ' + projLabel;
 }
 
 // ---- Frame overlay ----------------------------------------------------------
@@ -271,7 +295,12 @@ cv.addEventListener('wheel', e => {
   e.preventDefault();
   const ROLL_SENS = 0.003;  // radians per scroll pixel
   const ZOOM_SENS = 0.001;
-  if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+  if (e.altKey) {
+    // Alt/Option+scroll = fisheye blend
+    const FISHEYE_SENS = 0.002;
+    fisheyeK = Math.max(0, Math.min(1, fisheyeK + e.deltaY * FISHEYE_SENS));
+    document.getElementById('fisheye-k').value = fisheyeK;
+  } else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
     // Shift+scroll or horizontal scroll = roll
     const delta = e.shiftKey ? e.deltaY : e.deltaX;
     roll += delta * ROLL_SENS;
@@ -400,6 +429,10 @@ document.getElementById('apply-btn').addEventListener('click', () => {
   const ratio = fDst / fSrc;
   fSrc = f * Math.max(imgW, imgH) / 36;
   fDst = fSrc * ratio;
+  draw(); updateHUD();
+});
+document.getElementById('fisheye-k').addEventListener('input', e => {
+  fisheyeK = parseFloat(e.target.value);
   draw(); updateHUD();
 });
 </script>
