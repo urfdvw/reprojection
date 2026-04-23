@@ -154,11 +154,32 @@ body.mobile #ctrl input[type=number] {
 body.mobile .btn {
   min-height: 32px;
 }
+
+/* Center crosshair */
+#crosshair {
+  position: fixed;
+  left: 50%;
+  top: calc((100vh - var(--ctrl-h, 0px)) / 2);
+  transform: translate(-50%, -50%);
+  width: 14px; height: 14px;
+  pointer-events: none;
+  z-index: 9;
+}
+#crosshair::before,
+#crosshair::after {
+  content: '';
+  position: absolute;
+  background: red;
+  border-radius: 1px;
+}
+#crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+#crosshair::after  { width: 100%; height: 2px; top: 50%;  transform: translateY(-50%); }
 </style>
 </head>
 <body>
 
 <canvas id="c"></canvas>
+<div id="crosshair"></div>
 <div id="frame-box">
   <div class="frame-handle" data-dir="n"></div>
   <div class="frame-handle" data-dir="s"></div>
