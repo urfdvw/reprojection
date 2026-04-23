@@ -46,21 +46,37 @@ canvas.dragging { cursor: grabbing; }
 #ctrl { top: 14px; right: 14px; }
 
 #ctrl label { display: block; margin-bottom: 8px; color: #888; }
+#ctrl .ctrl-row { display:flex; align-items:center; gap:5px; margin-bottom:8px; }
+#ctrl .ctrl-row > * { flex-shrink:0; }
+/* Unified height for all interactive controls */
+#ctrl input[type=number],
+#ctrl select,
+.btn {
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 3px;
+  border: 1px solid #3a3a3a;
+  vertical-align: middle;
+}
 #ctrl input[type=number] {
-  width: 68px; background: #181818; color: #ddd;
-  border: 1px solid #3a3a3a; padding: 3px 6px;
-  border-radius: 3px; font-family: inherit; font-size: 12px; margin-right: 2px;
+  width: 52px; background: #181818; color: #ddd;
+}
+#ctrl select {
+  background: #181818; color: #ddd; cursor: pointer;
+  min-width: 0;
 }
 #ctrl input[type=range] {
   width: 100%; accent-color: #7af; margin: 4px 0;
   cursor: pointer;
 }
 .btn {
-  display: inline-block; padding: 3px 9px;
-  background: #1f1f1f; color: #bbb; border: 1px solid #3a3a3a;
-  border-radius: 3px; cursor: pointer;
-  font-family: 'Courier New', monospace; font-size: 12px;
-  margin-top: 4px; margin-right: 4px;
+  display: inline-flex; align-items: center;
+  background: #1f1f1f; color: #bbb;
+  cursor: pointer; white-space: nowrap;
 }
 .btn:hover { background: #2a2a2a; }
 
@@ -80,12 +96,15 @@ canvas.dragging { cursor: grabbing; }
 .frame-handle[data-dir="e"]  { width:6px;  top:25%; bottom:25%; right:-3px;  cursor:e-resize; }
 .frame-handle[data-dir="w"]  { width:6px;  top:25%; bottom:25%; left:-3px;   cursor:w-resize; }
 
-#ctrl select {
-  background: #181818; color: #ddd;
-  border: 1px solid #3a3a3a; padding: 3px 6px;
-  border-radius: 3px; font-family: inherit; font-size: 12px;
-  width: 100%; margin-top: 2px; cursor: pointer;
-}
+/* Mobile: hide edge handles, enlarge corner handles */
+body.mobile .frame-handle[data-dir="n"],
+body.mobile .frame-handle[data-dir="s"],
+body.mobile .frame-handle[data-dir="e"],
+body.mobile .frame-handle[data-dir="w"] { display: none; }
+body.mobile .frame-handle[data-dir="nw"] { width:22px; height:22px; top:-11px; left:-11px; }
+body.mobile .frame-handle[data-dir="ne"] { width:22px; height:22px; top:-11px; right:-11px; }
+body.mobile .frame-handle[data-dir="sw"] { width:22px; height:22px; bottom:-11px; left:-11px; }
+body.mobile .frame-handle[data-dir="se"] { width:22px; height:22px; bottom:-11px; right:-11px; }
 
 body.mobile #drop-zone .hint,
 body.mobile #help,
@@ -93,21 +112,43 @@ body.mobile #hud {
   display: none !important;
 }
 
+/* ---- Mobile bottom bar ---- */
+body.mobile {
+  --ctrl-h: 140px;
+}
+
 body.mobile #ctrl {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
   top: auto;
-  right: 12px;
-  bottom: 12px;
-  left: 12px;
-  width: auto;
+  width: 100%;
   max-width: none;
+  border-radius: 0;
+  border-left: none; border-right: none; border-bottom: none;
+  border-top: 1px solid rgba(255,255,255,0.10);
+  padding: 10px 14px 12px;
+  background: rgba(0,0,0,0.88);
+  z-index: 15;
+  height: var(--ctrl-h);
+  overflow-y: auto;
+}
+
+/* True split layout: image area ends where ctrl bar begins */
+body.mobile canvas,
+body.mobile #drop-zone {
+  inset: 0 0 var(--ctrl-h, 140px) 0;
+  height: auto;
+}
+body.mobile #frame-box {
+  bottom: var(--ctrl-h, 140px);
 }
 
 body.mobile #ctrl label {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 body.mobile #ctrl input[type=number] {
-  width: 72px;
+  width: 52px;
 }
 
 body.mobile .btn {
@@ -150,21 +191,20 @@ body.mobile .btn {
 <div id="hud" class="panel hidden"></div>
 
 <div id="ctrl" class="panel hidden">
-  <label>
-    35mm equiv. focal length<br>
+  <div class="ctrl-row" style="color:#888">
+    <span style="flex:1">35mm equiv. focal length</span>
+  </div>
+  <div class="ctrl-row" style="margin-top:-4px">
     <input type="number" id="f35" min="4" max="2000" step="1" value="50">mm
     <button class="btn" id="apply-btn">Apply</button>
-  </label>
-  <label style="display:block;margin-bottom:8px;color:#888">
-    Projection<br>
-    <span style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:2px">
-      <span>Perspective</span><span>Equidistant</span>
-    </span>
-    <input type="range" id="fisheye-k" min="0" max="1" step="0.01" value="0">
-  </label>
-  <label style="display:block;margin-bottom:8px;color:#888">
-    Export ratio<br>
-    <select id="frame-ratio">
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:6px">
+    <span>Perspective</span><span>Equidistant</span>
+  </div>
+  <input type="range" id="fisheye-k" min="0" max="1" step="0.01" value="0" style="width:100%;accent-color:#7af;margin:4px 0 8px;cursor:pointer">
+  <div class="ctrl-row">
+    <span style="color:#888;flex-shrink:0">Export ratio</span>
+    <select id="frame-ratio" style="flex:1;min-width:0">
       <option value="original">Original</option>
       <option value="freeform">Free form</option>
       <option value="1:1">1:1 Square</option>
@@ -184,10 +224,12 @@ body.mobile .btn {
         <option value="9:21">9:21 Tall</option>
       </optgroup>
     </select>
-  </label>
-  <button class="btn" id="open-btn">Open image</button>
-  <button class="btn" id="reset-btn">Reset view</button>
-  <button class="btn" id="export-btn">Export frame</button>
+    <button class="btn" id="reset-btn">Reset view</button>
+  </div>
+  <div class="ctrl-row">
+    <button class="btn" id="open-btn">Open image</button>
+    <button class="btn" id="export-btn">Export frame</button>
+  </div>
 </div>
 
 <input type="file" id="file-in" accept="image/*" style="display:none">
@@ -205,8 +247,9 @@ if (!gl) { alert('WebGL not supported'); }
 
 function resize() {
   const dpr = devicePixelRatio || 1;
+  const ctrlH = window.matchMedia('(max-width: 768px)').matches ? 140 : 0;
   cv.width  = Math.round(window.innerWidth  * dpr);
-  cv.height = Math.round(window.innerHeight * dpr);
+  cv.height = Math.round((window.innerHeight - ctrlH) * dpr);
   gl.viewport(0, 0, cv.width, cv.height);
 }
 resize();
@@ -225,11 +268,10 @@ const FS = [
   'uniform float uFD;',   // dest focal length   (image px)
   'uniform float uK;',    // fisheye blend: 0=perspective, 1=equidistant
   'uniform mat3  uR;',    // rotation matrix
-  'uniform float uSC;',   // canvas px per image px (overrides auto)
-  'uniform vec2  uCenter;', // viewport center offset in image px
+  'uniform float uSC;',   // canvas px per image px
+  'uniform vec2  uCenter;', // image-px offset of viewport centre from scene centre
   'void main(){',
-  '  float sc = uSC;',
-  '  vec2 s = (gl_FragCoord.xy - uRes*0.5) / sc + uCenter;',
+  '  vec2 s = (gl_FragCoord.xy - uRes*0.5) / uSC + uCenter;',
   '  float r = length(s);',
   '  vec3 dir;',
   '  if(r < 0.0001){',
@@ -286,17 +328,23 @@ let imgW = 1, imgH = 1;
 let fSrc = 1000, fDst = 1000;
 let yaw = 0, pitch = 0, roll = 0;
 let fisheyeK = 0;
-let frameX = 0, frameY = 0, frameW = 0, frameH = 0;
-let frameResizing = false, resizeHandle = '';
-let frameMoving = false;
-let resizeStartX = 0, resizeStartY = 0, resizeStartFX = 0, resizeStartFY = 0, resizeStartW = 0, resizeStartH = 0;
+// Frame stored in image-pixel space (origin = scene centre, Y positive = CSS down)
+// This makes the frame viewport-resize-independent
+let frameImgX = 0, frameImgY = 0, frameImgW = 0, frameImgH = 0;
+let frameResizing = false, frameMoving = false, resizeHandle = '';
+let resizeStartX = 0, resizeStartY = 0;
+let resizeStartImgX = 0, resizeStartImgY = 0, resizeStartImgW = 0, resizeStartImgH = 0;
 
 const ROT_SPD  = Math.PI / 3;  // 60 deg/s for keys
 const ZOOM_SPD = Math.LN2;     // x2 or /2 per second
 const MOBILE_QUERY = '(max-width: 768px)';
 const TOUCH_PAN_SENS = 0.004;
 
-function reset() { yaw = pitch = roll = 0; fDst = fSrc; }
+function reset() {
+  yaw = pitch = roll = 0; fDst = fSrc;
+  frameImgW = 0; // triggers re-init in updateFrame
+  updateFrame();
+}
 
 function isMobileScreen() {
   return window.matchMedia(MOBILE_QUERY).matches;
@@ -304,6 +352,8 @@ function isMobileScreen() {
 
 function syncMobileUI() {
   document.body.classList.toggle('mobile', isMobileScreen());
+  // --ctrl-h is a CSS constant (140px) defined on body.mobile; no JS measurement needed
+  if (loaded) { resize(); draw(); updateFrame(); }
 }
 
 syncMobileUI();
@@ -324,13 +374,14 @@ function rotMat(y, p, r) {
 
 function draw() {
   if (!loaded) return;
+  const sc = Math.min(cv.width / imgW, cv.height / imgH);
   gl.uniform2f(U.uRes, cv.width, cv.height);
   gl.uniform2f(U.uImg, imgW, imgH);
   gl.uniform1f(U.uFS, fSrc);
   gl.uniform1f(U.uFD, fDst);
   gl.uniform1f(U.uK, fisheyeK);
   gl.uniformMatrix3fv(U.uR, false, rotMat(yaw, pitch, roll));
-  gl.uniform1f(U.uSC, Math.min(cv.width / imgW, cv.height / imgH));
+  gl.uniform1f(U.uSC, sc);
   gl.uniform2f(U.uCenter, 0, 0);
   gl.uniform1i(U.uTex, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -342,8 +393,10 @@ function updateHUD() {
   const f35eq = (fDst * 36 / Math.max(imgW, imgH)).toFixed(0);
   const projLabel = fisheyeK === 0 ? 'Perspective' : fisheyeK === 1 ? 'Equidistant' : 'Fisheye ' + Math.round(fisheyeK * 100) + '%';
   const minPx = Math.min(imgW, imgH);
-  const expW = frameW <= frameH ? minPx : Math.round(minPx * frameW / frameH);
-  const expH = frameW <= frameH ? Math.round(minPx * frameH / frameW) : minPx;
+  const shortEdge = Math.min(frameImgW, frameImgH);
+  const sc = shortEdge > 0 ? minPx / shortEdge : 1;
+  const expW = Math.round(frameImgW * sc);
+  const expH = Math.round(frameImgH * sc);
   document.getElementById('hud').innerHTML =
     'Yaw: ' + fmtDeg(yaw) + ' &nbsp; Pitch: ' + fmtDeg(pitch) + ' &nbsp; Roll: ' + fmtDeg(roll) + '<br>' +
     'Focal: ' + f35eq + 'mm equiv &nbsp;&#183;&nbsp; src: ' + Math.round(fSrc) + 'px' + '<br>' +
@@ -354,12 +407,37 @@ function updateHUD() {
 // ---- Frame overlay ----------------------------------------------------------
 const frameEl = document.getElementById('frame-box');
 
+// Available viewport height (excludes mobile bottom bar)
+const MOBILE_CTRL_H = 140;
+function viewH() {
+  return window.innerHeight - (isMobileScreen() ? MOBILE_CTRL_H : 0);
+}
+
+// imgScale: CSS px per image px for current viewport
+function imgScale() { return Math.min(window.innerWidth / imgW, viewH() / imgH); }
+
+// Convert image-space frame to CSS and update DOM.
+// Called on every resize — no repositioning logic needed since frame is in image space.
 function positionFrame() {
-  frameEl.style.width   = frameW + 'px';
-  frameEl.style.height  = frameH + 'px';
-  frameEl.style.left    = frameX + 'px';
-  frameEl.style.top     = frameY + 'px';
+  const s = imgScale();
+  const ww = window.innerWidth, wh = viewH();
+  frameEl.style.left    = (ww / 2 + frameImgX * s) + 'px';
+  frameEl.style.top     = (wh / 2 + frameImgY * s) + 'px';
+  frameEl.style.width   = (frameImgW * s) + 'px';
+  frameEl.style.height  = (frameImgH * s) + 'px';
   frameEl.style.display = 'block';
+}
+
+function clampFrame() {
+  const s = imgScale();
+  const ww = window.innerWidth, wh = viewH();
+  // Clamp so the centre of every corner handle stays inside the viewport.
+  // Corners sit at (frameImgX, frameImgY), (frameImgX+frameImgW, frameImgY),
+  // (frameImgX, frameImgY+frameImgH), (frameImgX+frameImgW, frameImgY+frameImgH).
+  // CSS position of top-left corner centre = ww/2 + frameImgX*s
+  // Must satisfy: 0 <= centre <= ww  (and same for Y).
+  frameImgX = Math.max(-ww / 2 / s,               Math.min((ww / 2 - frameImgW * s) / s, frameImgX));
+  frameImgY = Math.max(-wh / 2 / s,               Math.min((wh / 2 - frameImgH * s) / s, frameImgY));
 }
 
 function getTargetRatio() {
@@ -373,109 +451,84 @@ function getTargetRatio() {
 function applyRatioSnap() {
   if (!loaded) return;
   const sel = document.getElementById('frame-ratio').value;
-  const ww = window.innerWidth, wh = window.innerHeight;
   if (sel === 'original') {
-    const scale = Math.min(ww / imgW, wh / imgH);
-    frameW = imgW * scale;
-    frameH = imgH * scale;
-  } else {
-    const ratio = getTargetRatio();
-    if (ratio <= 0) return; // freeform – keep current size
-    const maxW = ww - 4, maxH = wh - 4;
-    if (frameW / frameH > ratio) {
-      frameH = frameW / ratio;
-      if (frameH > maxH) { frameH = maxH; frameW = frameH * ratio; }
-    } else {
-      frameW = frameH * ratio;
-      if (frameW > maxW) { frameW = maxW; frameH = frameW / ratio; }
-    }
+    frameImgX = -imgW / 2;
+    frameImgY = -imgH / 2;
+    frameImgW = imgW;
+    frameImgH = imgH;
+    return;
   }
-  // re-center after snap
-  frameX = (ww - frameW) / 2;
-  frameY = (wh - frameH) / 2;
+  const ratio = getTargetRatio();
+  if (ratio <= 0) return; // freeform – keep current
+  const s = imgScale();
+  const ww = window.innerWidth, wh = viewH();
+  const maxWi = (ww - 14) / s, maxHi = (wh - 14) / s;
+  frameImgH = frameImgW / ratio;
+  if (frameImgH > maxHi) { frameImgH = maxHi; frameImgW = frameImgH * ratio; }
+  if (frameImgW > maxWi) { frameImgW = maxWi; frameImgH = frameImgW / ratio; }
+  frameImgX = -frameImgW / 2;
+  frameImgY = -frameImgH / 2;
 }
 
 function applyFrameResize(dx, dy) {
+  const s = imgScale();
+  const dxi = dx / s;          // convert CSS delta → image pixels
+  const dyi = dy / s;
   const ratio = getTargetRatio();
   const h = resizeHandle;
-  const MIN = 20;
+  const MIN = 20 / s;          // minimum frame size in image px
 
-  // Which edges are moving?
-  const mR = h === 'e'  || h === 'se' || h === 'ne';
-  const mL = h === 'w'  || h === 'sw' || h === 'nw';
-  const mB = h === 's'  || h === 'se' || h === 'sw';
-  const mT = h === 'n'  || h === 'ne' || h === 'nw';
+  const mR = h==='e'||h==='se'||h==='ne';
+  const mL = h==='w'||h==='sw';
+  const mB = h==='s'||h==='se'||h==='sw';
+  const mT = h==='n'||h==='ne';
 
-  // Raw new size from dragging only this handle
-  let newW = Math.max(MIN, resizeStartW + (mR ? dx : mL ? -dx : 0));
-  let newH = Math.max(MIN, resizeStartH + (mB ? dy : mT ? -dy : 0));
+  let newW = Math.max(MIN, resizeStartImgW + (mR ? dxi : mL ? -dxi : 0));
+  let newH = Math.max(MIN, resizeStartImgH + (mB ? dyi : mT ? -dyi : 0));
+
+  // Fixed anchor edges (the edges that do NOT move)
+  const fixedL  = resizeStartImgX;
+  const fixedR  = resizeStartImgX + resizeStartImgW;
+  const fixedT  = resizeStartImgY;
+  const fixedB  = resizeStartImgY + resizeStartImgH;
+  const fixedCx = resizeStartImgX + resizeStartImgW / 2;
+  const fixedCy = resizeStartImgY + resizeStartImgH / 2;
 
   // Apply ratio constraint
   if (ratio > 0) {
     const isCorner = (mR || mL) && (mT || mB);
-    if (!isCorner && (mR || mL)) {
-      // horizontal-only edge: width drives, height follows, center vertically
-      newH = newW / ratio;
-    } else if (!isCorner && (mT || mB)) {
-      // vertical-only edge: height drives, width follows, center horizontally
-      newW = newH * ratio;
+    if (!isCorner) {
+      if (mR || mL) newH = newW / ratio;
+      else          newW = newH * ratio;
     } else {
-      // corner: dominant axis wins
       if (Math.abs(dx) >= Math.abs(dy)) newH = newW / ratio;
       else                               newW = newH * ratio;
-      newW = Math.max(MIN, newW);
-      newH = Math.max(MIN, newH);
     }
+    newW = Math.max(MIN, newW);
+    newH = Math.max(MIN, newH);
   }
 
-  // Fixed-edge anchors (the edges that don't move)
-  const fixedRight  = resizeStartFX + resizeStartW;
-  const fixedBottom = resizeStartFY + resizeStartH;
-
-  // Compute new top-left
-  let newX = mL ? fixedRight - newW : resizeStartFX;
-  let newY = mT ? fixedBottom - newH : resizeStartFY;
-
-  // For single-axis edge+ratio drags, center on the perpendicular axis
-  if (ratio > 0 && !((mR || mL) && (mT || mB))) {
-    if (mR || mL) newY = resizeStartFY + (resizeStartH - newH) / 2;
-    if (mT || mB) newX = resizeStartFX + (resizeStartW - newW) / 2;
-  }
-
-  frameX = newX;
-  frameY = newY;
-  frameW = newW;
-  frameH = newH;
+  // Anchor position: pin the non-moving edge(s)
+  frameImgX = mR ? fixedL : mL ? fixedR - newW : fixedCx - newW / 2;
+  frameImgY = mB ? fixedT : mT ? fixedB - newH : fixedCy - newH / 2;
+  frameImgW = newW;
+  frameImgH = newH;
   clampFrame();
   positionFrame();
   updateHUD();
 }
 
-function clampFrame() {
-  const ww = window.innerWidth, wh = window.innerHeight;
-  const PAD = 7; // handle half-size
-  frameX = Math.max(PAD, Math.min(ww - frameW - PAD, frameX));
-  frameY = Math.max(PAD, Math.min(wh - frameH - PAD, frameY));
-}
-
 function updateFrame() {
   if (!loaded) return;
-  const ww = window.innerWidth, wh = window.innerHeight;
-  if (frameW === 0) {
-    const scale = Math.min(ww / imgW, wh / imgH);
-    frameW = imgW * scale;
-    frameH = imgH * scale;
-    frameX = (ww - frameW) / 2;
-    frameY = (wh - frameH) / 2;
-  } else {
-    // On window resize: clamp so frame stays visible
-    const s = Math.min((ww - 4) / frameW, (wh - 4) / frameH);
-    if (s < 1) {
-      frameW *= s; frameH *= s;
-      frameX = (ww - frameW) / 2;
-      frameY = (wh - frameH) / 2;
-    }
+  if (frameImgW === 0) {
+    // First load: default to full image centred
+    frameImgX = -imgW / 2;
+    frameImgY = -imgH / 2;
+    frameImgW = imgW;
+    frameImgH = imgH;
   }
+  // positionFrame() re-derives CSS from stable image-space coords;
+  // no adjustment needed for viewport changes (IME, rotation, etc.)
   positionFrame();
 }
 
@@ -496,16 +549,15 @@ const MOUSE_SENS = 0.004; // radians per CSS pixel
 
 cv.addEventListener('mousedown', e => {
   if (!loaded) return;
+  if (frameResizing || frameMoving) return;
   dragging = true; dragX = e.clientX; dragY = e.clientY;
   cv.classList.add('dragging');
 });
 document.addEventListener('mousemove', e => {
   if (frameMoving) {
-    frameX = resizeStartFX + (e.clientX - resizeStartX);
-    frameY = resizeStartFY + (e.clientY - resizeStartY);
-    clampFrame();
-    positionFrame();
-    updateHUD();
+    frameImgX = resizeStartImgX + (e.clientX - resizeStartX) / imgScale();
+    frameImgY = resizeStartImgY + (e.clientY - resizeStartY) / imgScale();
+    clampFrame(); positionFrame(); updateHUD();
     return;
   }
   if (frameResizing) {
@@ -521,9 +573,7 @@ document.addEventListener('mousemove', e => {
   draw(); updateHUD();
 });
 document.addEventListener('mouseup', () => {
-  dragging = false;
-  frameResizing = false;
-  frameMoving = false;
+  dragging = false; frameResizing = false; frameMoving = false;
   cv.classList.remove('dragging');
   document.body.style.cursor = '';
 });
@@ -658,28 +708,18 @@ let prevT = 0;
 // ---- Export -----------------------------------------------------------------
 function exportFrame() {
   if (!loaded) return;
-  const ww = window.innerWidth, wh = window.innerHeight;
 
-  // Scale: CSS px per image px on screen
-  const imgScale = Math.min(ww / imgW, wh / imgH);
-
-  // Frame size in image-coordinate space
-  const fw_img = frameW / imgScale;
-  const fh_img = frameH / imgScale;
-
-  // Export pixel dimensions: short edge = min(imgW, imgH)
+  // Export resolution: short edge = min(imgW, imgH)
   const minPx = Math.min(imgW, imgH);
-  const exportW = frameW <= frameH ? minPx : Math.round(minPx * frameW / frameH);
-  const exportH = frameW <= frameH ? Math.round(minPx * frameH / frameW) : minPx;
+  const shortEdge = Math.min(frameImgW, frameImgH);
+  const sc_export = minPx / shortEdge;          // export canvas px per image px
+  const exportW = Math.round(frameImgW * sc_export);
+  const exportH = Math.round(frameImgH * sc_export);
 
-  // Export scale: export pixels per image pixel
-  const sc_export = exportW / fw_img;
+  // Frame centre in image-px space (WebGL Y is up, our frameImgY is CSS-down)
+  const cx = frameImgX + frameImgW / 2;   // X from scene centre, right positive
+  const cy = -(frameImgY + frameImgH / 2); // Y from scene centre, up positive
 
-  // Frame center offset from screen centre in CSS px (Y flipped for WebGL)
-  const cx_img = (frameX + frameW / 2 - ww / 2) / imgScale;
-  const cy_img = (wh / 2 - frameY - frameH / 2) / imgScale;
-
-  // Render the exact frame viewport at export resolution
   const oldW = cv.width, oldH = cv.height;
   cv.width = exportW; cv.height = exportH;
   gl.viewport(0, 0, exportW, exportH);
@@ -690,13 +730,12 @@ function exportFrame() {
   gl.uniform1f(U.uK, fisheyeK);
   gl.uniformMatrix3fv(U.uR, false, rotMat(yaw, pitch, roll));
   gl.uniform1f(U.uSC, sc_export);
-  gl.uniform2f(U.uCenter, cx_img, cy_img);
+  gl.uniform2f(U.uCenter, cx, cy);
   gl.uniform1i(U.uTex, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
   const dataURL = cv.toDataURL('image/png');
 
-  // Restore display canvas
   cv.width = oldW; cv.height = oldH;
   gl.viewport(0, 0, oldW, oldH);
   draw();
@@ -747,6 +786,7 @@ async function loadFile(file) {
     URL.revokeObjectURL(url);
 
     loaded = true;
+    frameImgW = 0; // reset so updateFrame() re-initialises on next call
     document.getElementById('drop-zone').classList.add('hidden');
     ['hud','ctrl','help'].forEach(id =>
       document.getElementById(id).classList.remove('hidden'));
@@ -790,24 +830,17 @@ document.getElementById('fisheye-k').addEventListener('input', e => {
   fisheyeK = parseFloat(e.target.value);
   draw(); updateHUD();
 });
+
 document.getElementById('frame-ratio').addEventListener('change', () => {
-  applyRatioSnap();
-  positionFrame();
-  updateHUD();
+  applyRatioSnap(); positionFrame(); updateHUD();
 });
 
-// ---- Frame resize handles ---------------------------------------------------
+// ---- Frame handles ----------------------------------------------------------
 document.querySelectorAll('.frame-handle').forEach(handle => {
-  handle.addEventListener('mousedown', e => {
-    if (!loaded) return;
-    e.stopPropagation();
-    e.preventDefault();
-    resizeStartX  = e.clientX;
-    resizeStartY  = e.clientY;
-    resizeStartFX = frameX;
-    resizeStartFY = frameY;
-    resizeStartW  = frameW;
-    resizeStartH  = frameH;
+  function startHandle(cx, cy) {
+    resizeStartX     = cx; resizeStartY     = cy;
+    resizeStartImgX  = frameImgX; resizeStartImgY  = frameImgY;
+    resizeStartImgW  = frameImgW; resizeStartImgH  = frameImgH;
     if (handle.dataset.dir === 'nw') {
       frameMoving = true;
       document.body.style.cursor = 'move';
@@ -816,24 +849,17 @@ document.querySelectorAll('.frame-handle').forEach(handle => {
       resizeHandle  = handle.dataset.dir;
       document.body.style.cursor = window.getComputedStyle(handle).cursor;
     }
+  }
+  handle.addEventListener('mousedown', e => {
+    if (!loaded) return;
+    e.stopPropagation(); e.preventDefault();
+    startHandle(e.clientX, e.clientY);
   });
   handle.addEventListener('touchstart', e => {
     if (!loaded) return;
     e.stopPropagation();
-    touchMode = null; // cancel any canvas gesture in progress
-    const t = e.touches[0];
-    resizeStartX  = t.clientX;
-    resizeStartY  = t.clientY;
-    resizeStartFX = frameX;
-    resizeStartFY = frameY;
-    resizeStartW  = frameW;
-    resizeStartH  = frameH;
-    if (handle.dataset.dir === 'nw') {
-      frameMoving = true;
-    } else {
-      frameResizing = true;
-      resizeHandle  = handle.dataset.dir;
-    }
+    touchMode = null; // cancel canvas gesture
+    startHandle(e.touches[0].clientX, e.touches[0].clientY);
   }, { passive: true });
 });
 
@@ -842,11 +868,9 @@ document.addEventListener('touchmove', e => {
   e.preventDefault();
   const t = e.touches[0];
   if (frameMoving) {
-    frameX = resizeStartFX + (t.clientX - resizeStartX);
-    frameY = resizeStartFY + (t.clientY - resizeStartY);
-    clampFrame();
-    positionFrame();
-    updateHUD();
+    frameImgX = resizeStartImgX + (t.clientX - resizeStartX) / imgScale();
+    frameImgY = resizeStartImgY + (t.clientY - resizeStartY) / imgScale();
+    clampFrame(); positionFrame(); updateHUD();
   } else {
     applyFrameResize(t.clientX - resizeStartX, t.clientY - resizeStartY);
   }
