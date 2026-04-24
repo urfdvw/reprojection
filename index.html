@@ -258,6 +258,9 @@ body.mobile .btn {
 <script>
 'use strict';
 
+const MOBILE_QUERY = '(max-width: 768px)';
+const mobileQuery  = window.matchMedia(MOBILE_QUERY);
+
 // ---- WebGL setup ------------------------------------------------------------
 const cv = document.getElementById('c');
 // preserveDrawingBuffer needed for toDataURL() export
@@ -267,17 +270,15 @@ if (!gl) { alert('WebGL not supported'); }
 
 function resize() {
   const dpr = devicePixelRatio || 1;
-  const ctrlH = window.matchMedia('(max-width: 768px)').matches ? 140 : 0;
+  const ctrlH = mobileQuery.matches ? 140 : 0;
   cv.width  = Math.round(window.innerWidth  * dpr);
   cv.height = Math.round((window.innerHeight - ctrlH) * dpr);
   gl.viewport(0, 0, cv.width, cv.height);
-  // Position crosshair at exact centre of the canvas area
   const ch = document.getElementById('crosshair');
   ch.style.left = (window.innerWidth / 2) + 'px';
   ch.style.top  = ((window.innerHeight - ctrlH) / 2) + 'px';
 }
 resize();
-window.addEventListener('resize', () => { resize(); draw(); updateFrame(); });
 
 // ---- Shaders ----------------------------------------------------------------
 // No Unicode characters in GLSL source (some drivers reject non-ASCII)
@@ -361,10 +362,13 @@ let resizeStartImgX = 0, resizeStartImgY = 0, resizeStartImgW = 0, resizeStartIm
 let loadedFileName = '';
 let loadedExifObj = null;
 
-const ROT_SPD  = Math.PI / 3;  // 60 deg/s for keys
-const ZOOM_SPD = Math.LN2;     // x2 or /2 per second
-const MOBILE_QUERY = '(max-width: 768px)';
+const ROT_SPD      = Math.PI / 3;  // 60 deg/s for keys
+const ZOOM_SPD     = Math.LN2;     // x2 or /2 per second
 const TOUCH_PAN_SENS = 0.004;
+
+const hasPiexif  = typeof piexif !== 'undefined';
+const EMPTY_EXIF = { '0th': {}, 'Exif': {}, 'GPS': {}, 'Interop': {}, '1st': {} };
+const pad = n => String(n).padStart(2, '0');
 
 function reset() {
   yaw = pitch = roll = 0; fDst = fSrc;
@@ -373,29 +377,30 @@ function reset() {
 }
 
 function isMobileScreen() {
-  return window.matchMedia(MOBILE_QUERY).matches;
+  return mobileQuery.matches;
 }
 
 function syncMobileUI() {
   document.body.classList.toggle('mobile', isMobileScreen());
   // --ctrl-h is a CSS constant (140px) defined on body.mobile; no JS measurement needed
-  if (loaded) { resize(); draw(); updateFrame(); }
+  resize();
+  if (loaded) { draw(); updateFrame(); }
 }
 
 syncMobileUI();
 window.addEventListener('resize', syncMobileUI);
-window.matchMedia(MOBILE_QUERY).addEventListener('change', syncMobileUI);
+mobileQuery.addEventListener('change', syncMobileUI);
 
+const _rotMat = new Float32Array(9);
 // R = Ry(yaw) * Rx(pitch) * Rz(roll), column-major flat for WebGL
 function rotMat(y, p, r) {
   const cy=Math.cos(y), sy=Math.sin(y);
   const cp=Math.cos(p), sp=Math.sin(p);
   const cr=Math.cos(r), sr=Math.sin(r);
-  return new Float32Array([
-    cy*cr+sy*sp*sr,  cp*sr, -sy*cr+cy*sp*sr,   // col 0
-   -cy*sr+sy*sp*cr,  cp*cr,  sy*sr+cy*sp*cr,   // col 1
-    sy*cp,          -sp,     cy*cp              // col 2
-  ]);
+  _rotMat[0]= cy*cr+sy*sp*sr; _rotMat[1]= cp*sr; _rotMat[2]=-sy*cr+cy*sp*sr;
+  _rotMat[3]=-cy*sr+sy*sp*cr; _rotMat[4]= cp*cr; _rotMat[5]= sy*sr+cy*sp*cr;
+  _rotMat[6]= sy*cp;          _rotMat[7]=-sp;    _rotMat[8]= cy*cp;
+  return _rotMat;
 }
 
 function draw() {
@@ -496,6 +501,13 @@ function applyRatioSnap() {
   frameImgY = -frameImgH / 2;
 }
 
+function applyFrameMove(cx, cy) {
+  const s = imgScale();
+  frameImgX = resizeStartImgX + (cx - resizeStartX) / s;
+  frameImgY = resizeStartImgY + (cy - resizeStartY) / s;
+  clampFrame(); positionFrame(); updateHUD();
+}
+
 function applyFrameResize(dx, dy) {
   const s = imgScale();
   const dxi = dx / s;          // convert CSS delta → image pixels
@@ -581,9 +593,7 @@ cv.addEventListener('mousedown', e => {
 });
 document.addEventListener('mousemove', e => {
   if (frameMoving) {
-    frameImgX = resizeStartImgX + (e.clientX - resizeStartX) / imgScale();
-    frameImgY = resizeStartImgY + (e.clientY - resizeStartY) / imgScale();
-    clampFrame(); positionFrame(); updateHUD();
+    applyFrameMove(e.clientX, e.clientY);
     return;
   }
   if (frameResizing) {
@@ -735,7 +745,6 @@ let prevT = 0;
 function exportFrame() {
   if (!loaded) return;
 
-  // Export resolution: short edge = min(imgW, imgH)
   const minPx = Math.min(imgW, imgH);
   const shortEdge = Math.min(frameImgW, frameImgH);
   const sc_export = minPx / shortEdge;          // export canvas px per image px
@@ -767,16 +776,14 @@ function exportFrame() {
   draw();
 
   const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
   const dt = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   const baseName = loadedFileName.replace(/\.[^.]+$/, '');
   const downloadName = `${baseName}_${dt}.jpg`;
 
   let downloadUrl = dataURL;
-  if (typeof piexif !== 'undefined') {
+  if (hasPiexif) {
     try {
-      const exif = JSON.parse(JSON.stringify(loadedExifObj || {"0th":{}, "Exif":{}, "GPS":{}, "Interop":{}, "1st":{}}));
-      if (!exif['Exif']) exif['Exif'] = {};
+      const exif = structuredClone(loadedExifObj ?? EMPTY_EXIF);
       delete exif['Exif'][piexif.ExifIFD.FocalLength];
       delete exif['Exif'][piexif.ExifIFD.FocalLengthIn35mmFilm];
       if (fisheyeK === 0) {
@@ -785,11 +792,11 @@ function exportFrame() {
         exif['Exif'][piexif.ExifIFD.FocalLength] = [newF35, 1];
       }
       const exifBytes = piexif.dump(exif);
-      const jpegBin = atob(dataURL.split(',')[1]);
-      const newJpeg = piexif.insert(exifBytes, jpegBin);
-      const arr = new Uint8Array(newJpeg.length);
-      for (let i = 0; i < newJpeg.length; i++) arr[i] = newJpeg.charCodeAt(i);
-      downloadUrl = URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
+      const newJpeg = piexif.insert(exifBytes, atob(dataURL.split(',')[1]));
+      downloadUrl = URL.createObjectURL(new Blob(
+        [Uint8Array.from(newJpeg, c => c.charCodeAt(0))],
+        { type: 'image/jpeg' }
+      ));
     } catch (_) {}
   }
 
@@ -808,13 +815,10 @@ async function loadFile(file) {
 
   loadedFileName = file.name;
   loadedExifObj = null;
-  if (typeof piexif !== 'undefined') {
+  if (hasPiexif) {
     try {
-      const buf = await file.arrayBuffer();
-      const bytes = new Uint8Array(buf);
-      let bin = '';
-      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-      loadedExifObj = piexif.load(bin);
+      const bytes = new Uint8Array(await file.slice(0, 65536).arrayBuffer());
+      loadedExifObj = piexif.load(Array.from(bytes, b => String.fromCharCode(b)).join(''));
     } catch (_) {}
   }
 
@@ -933,13 +937,8 @@ document.addEventListener('touchmove', e => {
   if (!frameMoving && !frameResizing) return;
   e.preventDefault();
   const t = e.touches[0];
-  if (frameMoving) {
-    frameImgX = resizeStartImgX + (t.clientX - resizeStartX) / imgScale();
-    frameImgY = resizeStartImgY + (t.clientY - resizeStartY) / imgScale();
-    clampFrame(); positionFrame(); updateHUD();
-  } else {
-    applyFrameResize(t.clientX - resizeStartX, t.clientY - resizeStartY);
-  }
+  if (frameMoving) applyFrameMove(t.clientX, t.clientY);
+  else applyFrameResize(t.clientX - resizeStartX, t.clientY - resizeStartY);
 }, { passive: false });
 
 document.addEventListener('touchend', () => { frameResizing = false; frameMoving = false; });
