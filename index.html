@@ -254,6 +254,7 @@ body.mobile .btn {
 <input type="file" id="file-in" accept="image/*" style="display:none">
 
 <script src="https://cdn.jsdelivr.net/npm/exifr@7/dist/lite.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/piexifjs/piexif.js"></script>
 <script>
 'use strict';
 
@@ -357,6 +358,8 @@ let frameImgX = 0, frameImgY = 0, frameImgW = 0, frameImgH = 0;
 let frameResizing = false, frameMoving = false, resizeHandle = '';
 let resizeStartX = 0, resizeStartY = 0;
 let resizeStartImgX = 0, resizeStartImgY = 0, resizeStartImgW = 0, resizeStartImgH = 0;
+let loadedFileName = '';
+let loadedExifObj = null;
 
 const ROT_SPD  = Math.PI / 3;  // 60 deg/s for keys
 const ZOOM_SPD = Math.LN2;     // x2 or /2 per second
@@ -757,23 +760,63 @@ function exportFrame() {
   gl.uniform1i(U.uTex, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-  const dataURL = cv.toDataURL('image/png');
+  const dataURL = cv.toDataURL('image/jpeg', 0.95);
 
   cv.width = oldW; cv.height = oldH;
   gl.viewport(0, 0, oldW, oldH);
   draw();
 
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const dt = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const baseName = loadedFileName.replace(/\.[^.]+$/, '');
+  const downloadName = `${baseName}_${dt}.jpg`;
+
+  let downloadUrl = dataURL;
+  if (typeof piexif !== 'undefined') {
+    try {
+      const exif = JSON.parse(JSON.stringify(loadedExifObj || {"0th":{}, "Exif":{}, "GPS":{}, "Interop":{}, "1st":{}}));
+      if (!exif['Exif']) exif['Exif'] = {};
+      delete exif['Exif'][piexif.ExifIFD.FocalLength];
+      delete exif['Exif'][piexif.ExifIFD.FocalLengthIn35mmFilm];
+      if (fisheyeK === 0) {
+        const newF35 = Math.round(fDst * 36 / Math.max(imgW, imgH));
+        exif['Exif'][piexif.ExifIFD.FocalLengthIn35mmFilm] = newF35;
+        exif['Exif'][piexif.ExifIFD.FocalLength] = [newF35, 1];
+      }
+      const exifBytes = piexif.dump(exif);
+      const jpegBin = atob(dataURL.split(',')[1]);
+      const newJpeg = piexif.insert(exifBytes, jpegBin);
+      const arr = new Uint8Array(newJpeg.length);
+      for (let i = 0; i < newJpeg.length; i++) arr[i] = newJpeg.charCodeAt(i);
+      downloadUrl = URL.createObjectURL(new Blob([arr], { type: 'image/jpeg' }));
+    } catch (_) {}
+  }
+
   const a = document.createElement('a');
-  a.href = dataURL;
-  a.download = 'reprojected.png';
+  a.href = downloadUrl;
+  a.download = downloadName;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  if (downloadUrl !== dataURL) URL.revokeObjectURL(downloadUrl);
 }
 
 // ---- Image loading ----------------------------------------------------------
 async function loadFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
+
+  loadedFileName = file.name;
+  loadedExifObj = null;
+  if (typeof piexif !== 'undefined') {
+    try {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      loadedExifObj = piexif.load(bin);
+    } catch (_) {}
+  }
 
   let f35 = 50;
   try {
