@@ -5,251 +5,844 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Reprojection</title>
 <style>
+:root {
+  --sidebar-w: 320px;
+  --ctrl-h: 188px;
+  --bottom-h: 26px;
+  --bg-canvas: #1a1a1a;
+  --bg-panel: #2b2b2b;
+  --bg-panel-hi: #333333;
+  --bg-panel-lo: #262626;
+  --bg-input: #1c1c1c;
+  --bg-section: #2e2e2e;
+  --line-hi: #3a3a3a;
+  --line-lo: #1a1a1a;
+  --text-1: #d4d4d4;
+  --text-2: #8e8e8e;
+  --text-3: #5a5a5a;
+  --accent: #4a90e2;
+  --accent-hi: #5aa2f5;
+  --accent-lo: #2f6fb8;
+  --danger: #ee5252;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; background: #0d0d0d; overflow: hidden; }
-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg-canvas);
+  color: var(--text-1);
+  overflow: hidden;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- App shell ---- */
+.app {
+  display: flex; flex-direction: row;
+  width: 100%; height: 100%;
+}
+.preview {
+  flex: 1; min-width: 0;
+  position: relative;
+  background: #0e0e0e;
+  overflow: hidden;
+}
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid #000;
+  display: flex; flex-direction: column;
+  box-shadow: inset 1px 0 0 #3a3a3a;
+}
+
+/* ---- Canvas ---- */
+canvas {
+  position: absolute;
+  left: 0; top: 0;
+  width: 100%;
+  height: calc(100% - var(--bottom-h));
+  display: block; cursor: grab; touch-action: none;
+}
 canvas.dragging { cursor: grabbing; }
 
+/* ---- Bottom readout (desktop status bar) ---- */
+.bottom-readout {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: var(--bottom-h);
+  background: linear-gradient(180deg, #2c2c2c 0%, #232323 100%);
+  border-top: 1px solid #000;
+  box-shadow: inset 0 1px 0 #3a3a3a;
+  display: flex; align-items: stretch;
+  padding: 0 4px;
+  z-index: 11;
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+}
+.br-cell {
+  padding: 0 14px;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.br-cell .k {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.br-cell .v {
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.br-sep {
+  width: 1px;
+  background: #1a1a1a;
+  box-shadow: 1px 0 0 #3a3a3a;
+  margin: 5px 4px;
+}
+.br-spacer { flex: 1; }
+
+/* ---- Sidebar header (desktop) ---- */
+.sidebar-header {
+  height: 44px;
+  padding: 0 14px;
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(180deg, #3a3a3a 0%, #2e2e2e 100%);
+  border-bottom: 1px solid #000;
+  box-shadow: inset 0 1px 0 #444, inset 0 -1px 0 #1a1a1a;
+}
+.sidebar-header .logo-mark {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #6ab0ff 0%, #2f6fb8 60%, #1a3e6e 100%);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+.sidebar-header .brand {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-1);
+}
+.sidebar-header .filename {
+  font-size: 11px;
+  color: var(--text-2);
+  margin-left: auto;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.help-btn {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 50%;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+.help-btn:hover { color: var(--text-1); border-color: #6a6a6a; background: rgba(255,255,255,0.04); }
+
+/* ---- Sidebar body ---- */
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sidebar-body::-webkit-scrollbar { width: 8px; }
+.sidebar-body::-webkit-scrollbar-track { background: transparent; }
+.sidebar-body::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 4px; border: 1px solid #2b2b2b; }
+.sidebar-body::-webkit-scrollbar-thumb:hover { background: #444; }
+
+.section {
+  border-top: 1px solid #3a3a3a;
+  box-shadow: inset 0 -1px 0 #1d1d1d;
+}
+.section:first-child { border-top: none; }
+.section-header {
+  padding: 11px 14px 8px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-header::after {
+  content: '';
+  flex: 1; height: 1px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 0%, transparent 100%);
+}
+.section-body {
+  padding: 2px 14px 14px;
+}
+
+/* ---- Rows ---- */
+.row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+}
+.row:last-child { margin-bottom: 0; }
+.row .label {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+/* ---- Inputs ---- */
+input[type="number"], select {
+  background: var(--bg-input);
+  color: var(--text-1);
+  border: 1px solid #0c0c0c;
+  box-shadow: 0 0 0 1px #3a3a3a, inset 0 1px 0 rgba(0,0,0,0.4);
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-family: inherit;
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+input[type="number"]:focus, select:focus {
+  box-shadow: 0 0 0 1px var(--accent), inset 0 1px 0 rgba(0,0,0,0.4);
+}
+input[type="number"] { width: 70px; text-align: right; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+select {
+  width: 100%; cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-2) 50%),
+    linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
+  background-position:
+    right 12px center,
+    right 7px center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 22px;
+}
+
+/* ---- Buttons ---- */
+.btn {
+  height: 28px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, #3e3e3e 0%, #313131 100%);
+  border: 1px solid #1a1a1a;
+  box-shadow: 0 0 0 1px #4a4a4a, inset 0 1px 0 rgba(255,255,255,0.06);
+  color: var(--text-1);
+  font-size: 11px;
+  font-family: inherit;
+  border-radius: 2px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: background 0.1s;
+  user-select: none;
+}
+.btn:hover { background: linear-gradient(180deg, #4a4a4a 0%, #3a3a3a 100%); }
+.btn:active { background: linear-gradient(180deg, #2a2a2a 0%, #353535 100%); }
+.btn-primary {
+  background: linear-gradient(180deg, var(--accent-hi) 0%, var(--accent-lo) 100%);
+  box-shadow: 0 0 0 1px var(--accent-hi), inset 0 1px 0 rgba(255,255,255,0.2);
+  border-color: #1a3e6e;
+  color: #fff;
+  font-weight: 500;
+}
+.btn-primary:hover { background: linear-gradient(180deg, #6ab0ff 0%, #3680cc 100%); }
+.btn-primary:active { background: linear-gradient(180deg, #3680cc 0%, #5aa2f5 100%); }
+.btn-block { width: 100%; }
+.btn-row { display: flex; gap: 6px; }
+.btn-row > .btn { flex: 1; }
+
+/* ---- Slider ---- */
+.slider-wrap { padding-top: 2px; }
+.slider-labels {
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: var(--text-3);
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+}
+.slider-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.slider-row input[type="range"] { flex: 1; }
+.slider-row .slider-value {
+  font-size: 11px;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  min-width: 40px;
+  text-align: right;
+}
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: linear-gradient(180deg, #151515 0%, #222 100%);
+  border: 1px solid #0a0a0a;
+  box-shadow: 0 0 0 1px #3a3a3a, inset 0 1px 1px rgba(0,0,0,0.5);
+  border-radius: 2px;
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: linear-gradient(180deg, #151515 0%, #222 100%);
+  border: 1px solid #0a0a0a;
+  box-shadow: 0 0 0 1px #3a3a3a, inset 0 1px 1px rgba(0,0,0,0.5);
+  border-radius: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -6px;
+  width: 14px; height: 14px;
+  background: linear-gradient(180deg, #f0f0f0 0%, #b8b8b8 100%);
+  border: 1px solid #1a1a1a;
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px; height: 14px;
+  background: linear-gradient(180deg, #f0f0f0 0%, #b8b8b8 100%);
+  border: 1px solid #1a1a1a;
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+input[type="range"]:active::-webkit-slider-thumb { cursor: grabbing; background: linear-gradient(180deg, #fff 0%, #d0d0d0 100%); }
+
+/* ---- HUD grid (orientation readout) ---- */
+.hud-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: #1a1a1a;
+  border: 1px solid #0a0a0a;
+  box-shadow: 0 0 0 1px #3a3a3a, inset 0 1px 0 rgba(0,0,0,0.4);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.hud-cell {
+  background: linear-gradient(180deg, #2a2a2a 0%, #232323 100%);
+  padding: 8px 8px 7px;
+  display: flex; flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+}
+.hud-cell .k {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.hud-cell .v {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.meta-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 8px;
+  font-size: 11px;
+}
+.meta-row .k { color: var(--text-2); }
+.meta-row .v { color: var(--text-1); font-variant-numeric: tabular-nums; }
+
+/* ---- Sidebar footer (desktop) ---- */
+.sidebar-footer {
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #2e2e2e 0%, #262626 100%);
+  border-top: 1px solid #1a1a1a;
+  box-shadow: inset 0 1px 0 #3a3a3a;
+}
+
+/* ---- Help overlay ---- */
+.help-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.55);
+  display: none; align-items: center; justify-content: center;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.help-overlay.show { display: flex; animation: fadeIn 0.15s ease-out; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.help-card {
+  background: var(--bg-panel);
+  border: 1px solid #1a1a1a;
+  box-shadow: 0 0 0 1px #4a4a4a, 0 24px 64px rgba(0,0,0,0.7);
+  border-radius: 4px;
+  padding: 22px 26px;
+  min-width: 360px;
+}
+.help-card h3 {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+.help-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 20px;
+  font-size: 12px;
+  align-items: center;
+}
+.help-list kbd {
+  background: linear-gradient(180deg, #333 0%, #1c1c1c 100%);
+  border: 1px solid #0a0a0a;
+  box-shadow: 0 0 0 1px #4a4a4a, inset 0 1px 0 rgba(255,255,255,0.08);
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  min-width: 28px;
+  text-align: center;
+}
+.help-list .desc { color: var(--text-2); }
+
+/* ---- Drop zone ---- */
 #drop-zone {
-  position: fixed; inset: 0; z-index: 20;
+  position: absolute; left: 0; right: 0; top: 0; bottom: var(--bottom-h);
+  z-index: 20;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  background: #0d0d0d; color: #aaa;
-  font-family: 'Courier New', monospace;
+  background: #1a1a1a;
+  color: var(--text-2);
   cursor: pointer; user-select: none;
   transition: background 0.15s;
 }
-#drop-zone.drag-over { background: #0d1a0d; }
+#drop-zone.drag-over { background: #1c2a3a; }
+#drop-zone.drag-over .dz-frame { border-color: var(--accent); }
 #drop-zone.hidden { display: none; }
-#drop-zone h1 { font-size: 1.6em; font-weight: normal; letter-spacing: 0.05em; color: #7af; margin-bottom: 0.5em; }
-#drop-zone p { color: #555; font-size: 0.85em; margin: 3px 0; }
-#drop-zone .hint { margin-top: 2em; color: #334; font-size: 0.78em; line-height: 2; text-align: center; }
+.dz-frame {
+  width: 96px; height: 70px;
+  border: 1.5px dashed #3a3a3a;
+  border-radius: 3px;
+  margin-bottom: 22px;
+  position: relative;
+  transition: border-color 0.15s;
+}
+.dz-frame::before {
+  content: ''; position: absolute;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: #3a3a3a;
+  top: 10px; right: 12px;
+}
+.dz-frame::after {
+  content: ''; position: absolute;
+  width: 0; height: 0;
+  bottom: 8px; left: 12px; right: 12px;
+  height: 28px;
+  background:
+    linear-gradient(135deg, transparent 50%, #3a3a3a 50%) 0 0/16px 16px,
+    linear-gradient(135deg, #3a3a3a 50%, transparent 50%) 12px 8px/16px 16px;
+  background-color: transparent;
+  opacity: 0.6;
+}
+#drop-zone h1 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-1);
+  margin-bottom: 8px;
+}
+#drop-zone .sub {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+#drop-zone .hint {
+  margin-top: 32px;
+  color: var(--text-3);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  display: flex; gap: 18px;
+  align-items: center;
+}
+#drop-zone .hint .sep {
+  width: 1px; height: 10px; background: #2a2a2a;
+}
 
-/* frame overlay – sized/positioned by JS */
+/* ---- Frame overlay ---- */
 #frame-box {
-  position: fixed; pointer-events: none; z-index: 8;
-  border: 1px solid rgba(255,255,255,0.35);
-  box-shadow: 0 0 0 9999px rgba(0,0,0,0.28);
+  position: absolute; pointer-events: none; z-index: 8;
+  border: 1px solid rgba(255,255,255,0.45);
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);
   display: none;
 }
-
-.panel {
-  position: fixed; z-index: 10;
-  background: rgba(0,0,0,0.65);
-  font-family: 'Courier New', monospace; font-size: 12px;
-  color: #bbb; padding: 8px 12px; border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.07);
-}
-.panel.hidden { display: none; }
-
-#hud  { bottom: 14px; left: 14px; line-height: 1.9; pointer-events: none; }
-#help { top: 14px; left: 14px; line-height: 1.9; pointer-events: none; }
-#ctrl { top: 14px; right: 14px; }
-
-#ctrl label { display: block; margin-bottom: 8px; color: #888; }
-#ctrl .ctrl-row { display:flex; align-items:center; gap:5px; margin-bottom:8px; }
-#ctrl .ctrl-row > * { flex-shrink:0; }
-/* Unified height for all interactive controls */
-#ctrl input[type=number],
-#ctrl select,
-.btn {
-  height: 24px;
-  box-sizing: border-box;
-  padding: 0 6px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1;
-  border-radius: 3px;
-  border: 1px solid #3a3a3a;
-  vertical-align: middle;
-}
-#ctrl input[type=number] {
-  width: 52px; background: #181818; color: #ddd;
-}
-#ctrl select {
-  background: #181818; color: #ddd; cursor: pointer;
-  min-width: 0;
-}
-#ctrl input[type=range] {
-  width: 100%; accent-color: #7af; margin: 4px 0;
-  cursor: pointer;
-}
-.btn {
-  display: inline-flex; align-items: center;
-  background: #1f1f1f; color: #bbb;
-  cursor: pointer; white-space: nowrap;
-}
-.btn:hover { background: #2a2a2a; }
-
-/* ---- Frame resize handles ---- */
 .frame-handle {
-  position: absolute;
-  pointer-events: auto;
-  background: rgba(255,255,255,0.85);
-  border-radius: 1px;
+  position: absolute; pointer-events: auto;
+  background: rgba(255,255,255,0.9);
 }
-.frame-handle[data-dir="nw"] { width:14px;height:14px; top:0; left:0; cursor:move; background:#7af; border-radius:2px; box-shadow:0 0 0 2px rgba(0,0,0,0.5); }
-.frame-handle[data-dir="ne"] { width:10px;height:10px; top:0;    right:0;   cursor:ne-resize; }
-.frame-handle[data-dir="sw"] { width:10px;height:10px; bottom:0; left:0;    cursor:sw-resize; }
-.frame-handle[data-dir="se"] { width:10px;height:10px; bottom:0; right:0;   cursor:se-resize; }
-.frame-handle[data-dir="n"]  { height:6px; left:25%; right:25%; top:0;    cursor:n-resize; }
-.frame-handle[data-dir="s"]  { height:6px; left:25%; right:25%; bottom:0; cursor:s-resize; }
-.frame-handle[data-dir="e"]  { width:6px;  top:25%; bottom:25%; right:0;  cursor:e-resize; }
-.frame-handle[data-dir="w"]  { width:6px;  top:25%; bottom:25%; left:0;   cursor:w-resize; }
+.frame-handle[data-dir="nw"] {
+  width: 14px; height: 14px; top: 0; left: 0;
+  cursor: move;
+  background: var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.frame-handle[data-dir="ne"] { width: 10px; height: 10px; top: 0;    right: 0;   cursor: ne-resize; border-radius: 1px; }
+.frame-handle[data-dir="sw"] { width: 10px; height: 10px; bottom: 0; left: 0;    cursor: sw-resize; border-radius: 1px; }
+.frame-handle[data-dir="se"] { width: 10px; height: 10px; bottom: 0; right: 0;   cursor: se-resize; border-radius: 1px; }
+.frame-handle[data-dir="n"]  { height: 4px; left: 30%; right: 30%; top: 0;    cursor: n-resize; opacity: 0.75; }
+.frame-handle[data-dir="s"]  { height: 4px; left: 30%; right: 30%; bottom: 0; cursor: s-resize; opacity: 0.75; }
+.frame-handle[data-dir="e"]  { width: 4px;  top: 30%; bottom: 30%; right: 0;  cursor: e-resize; opacity: 0.75; }
+.frame-handle[data-dir="w"]  { width: 4px;  top: 30%; bottom: 30%; left: 0;   cursor: w-resize; opacity: 0.75; }
 
-/* Mobile: hide edge handles, enlarge corner handles */
+/* ---- Crosshair ---- */
+#crosshair {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 18px; height: 18px;
+  pointer-events: none; z-index: 9;
+  opacity: 0.85;
+}
+#crosshair::before, #crosshair::after {
+  content: ''; position: absolute;
+  background: #ee5252;
+  box-shadow: 0 0 2px rgba(0,0,0,0.6);
+}
+#crosshair::before { width: 1.5px; height: 100%; left: 50%; transform: translateX(-50%); }
+#crosshair::after  { width: 100%; height: 1.5px; top: 50%; transform: translateY(-50%); }
+
+/* ---- Legacy hidden ---- */
+#hud, #help { display: none !important; }
+
+/* ---- Desktop/mobile visibility ---- */
+body.mobile .desktop-only { display: none !important; }
+.mobile-only  { display: none !important; }
+body.mobile .mobile-only  { display: revert !important; }
+
+/* ---- Mobile layout ---- */
+body.mobile .app { flex-direction: column; }
+body.mobile .preview { flex: 1; min-height: 0; }
+body.mobile .bottom-readout { display: none; }
+body.mobile { --bottom-h: 0px; }
+body.mobile .sidebar {
+  width: 100%;
+  height: var(--ctrl-h);
+  border-left: none;
+  border-top: 1px solid #000;
+  box-shadow: inset 0 1px 0 #3a3a3a;
+  flex-shrink: 0;
+}
+body.mobile .sidebar-body { overflow: hidden; }
+
+.m-stack { display: flex; flex-direction: column; height: 100%; }
+
+/* Mobile compact bar */
+.m-section {
+  padding: 10px 14px;
+  border-bottom: 1px solid #1d1d1d;
+  box-shadow: inset 0 1px 0 #3a3a3a;
+}
+.m-section:first-child { box-shadow: none; }
+.m-section:last-child { border-bottom: none; }
+
+.m-slider-row {
+  display: flex; align-items: center; gap: 12px;
+}
+.m-slider-row .m-label {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  font-weight: 600;
+  min-width: 64px;
+}
+.m-slider-row input[type="range"] { flex: 1; }
+.m-slider-row .m-value {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  min-width: 36px;
+  text-align: right;
+}
+
+.m-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+.m-cell {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.m-cell .m-label {
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.m-cell input[type="number"],
+.m-cell select,
+.m-cell .btn {
+  width: 100%; height: 32px; font-size: 12px;
+}
+.m-cell input[type="number"] { text-align: center; }
+
+.m-actions {
+  display: flex; gap: 8px;
+}
+.m-actions .btn {
+  flex: 1; height: 36px; font-size: 12px;
+}
+
+/* Mobile frame handles - bigger touch targets, still inside frame, still square */
 body.mobile .frame-handle[data-dir="n"],
 body.mobile .frame-handle[data-dir="s"],
 body.mobile .frame-handle[data-dir="e"],
 body.mobile .frame-handle[data-dir="w"] { display: none; }
-body.mobile .frame-handle[data-dir="nw"] { width:44px; height:44px; top:0; left:0; }
-body.mobile .frame-handle[data-dir="ne"] { width:44px; height:44px; top:0; right:0; }
-body.mobile .frame-handle[data-dir="sw"] { width:44px; height:44px; bottom:0; left:0; }
-body.mobile .frame-handle[data-dir="se"] { width:44px; height:44px; bottom:0; right:0; }
+body.mobile .frame-handle[data-dir="nw"] { width: 36px; height: 36px; top: 0; left: 0; }
+body.mobile .frame-handle[data-dir="ne"] { width: 28px; height: 28px; top: 0;    right: 0; }
+body.mobile .frame-handle[data-dir="sw"] { width: 28px; height: 28px; bottom: 0; left: 0; }
+body.mobile .frame-handle[data-dir="se"] { width: 28px; height: 28px; bottom: 0; right: 0; }
 
-body.mobile #drop-zone .hint,
-body.mobile #help,
-body.mobile #hud {
-  display: none !important;
-}
-
-/* ---- Mobile bottom bar ---- */
-body.mobile {
-  --ctrl-h: 140px;
-}
-
-body.mobile #ctrl {
-  position: fixed;
-  left: 0; right: 0; bottom: 0;
-  top: auto;
-  width: 100%;
-  max-width: none;
-  border-radius: 0;
-  border-left: none; border-right: none; border-bottom: none;
-  border-top: 1px solid rgba(255,255,255,0.10);
-  padding: 10px 14px 12px;
-  background: rgba(0,0,0,0.88);
-  z-index: 15;
-  height: var(--ctrl-h);
-  overflow-y: auto;
-}
-
-/* True split layout: image area ends where ctrl bar begins */
-body.mobile canvas,
-body.mobile #drop-zone {
-  inset: 0 0 var(--ctrl-h, 140px) 0;
-  height: auto;
-}
-body.mobile #frame-box {
-  bottom: var(--ctrl-h, 140px);
-}
-
-body.mobile #ctrl label {
-  margin-bottom: 8px;
-}
-
-body.mobile #ctrl input[type=number] {
-  width: 52px;
-}
-
-body.mobile .btn {
-  min-height: 32px;
-}
-
-/* Center crosshair */
-#crosshair {
-  position: fixed;
-  transform: translate(-50%, -50%);
-  width: 14px; height: 14px;
-  pointer-events: none;
-  z-index: 9;
-}
-#crosshair::before,
-#crosshair::after {
-  content: '';
-  position: absolute;
-  background: red;
-  border-radius: 1px;
-}
-#crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
-#crosshair::after  { width: 100%; height: 2px; top: 50%;  transform: translateY(-50%); }
+/* Hide help button in mobile header (no header on mobile) */
+body.mobile #drop-zone .hint { display: none; }
 </style>
 </head>
 <body>
 
-<canvas id="c"></canvas>
-<div id="crosshair"></div>
-<div id="frame-box">
-  <div class="frame-handle" data-dir="n"></div>
-  <div class="frame-handle" data-dir="s"></div>
-  <div class="frame-handle" data-dir="e"></div>
-  <div class="frame-handle" data-dir="w"></div>
-  <div class="frame-handle" data-dir="nw"></div>
-  <div class="frame-handle" data-dir="ne"></div>
-  <div class="frame-handle" data-dir="sw"></div>
-  <div class="frame-handle" data-dir="se"></div>
+<div class="app">
+  <!-- ============================================================
+       PREVIEW (left on desktop, top on mobile)
+       ============================================================ -->
+  <main class="preview">
+    <canvas id="c"></canvas>
+    <div id="crosshair"></div>
+    <div id="frame-box">
+      <div class="frame-handle" data-dir="n"></div>
+      <div class="frame-handle" data-dir="s"></div>
+      <div class="frame-handle" data-dir="e"></div>
+      <div class="frame-handle" data-dir="w"></div>
+      <div class="frame-handle" data-dir="nw"></div>
+      <div class="frame-handle" data-dir="ne"></div>
+      <div class="frame-handle" data-dir="sw"></div>
+      <div class="frame-handle" data-dir="se"></div>
+    </div>
+
+    <div id="drop-zone">
+      <div class="dz-frame"></div>
+      <h1>Reprojection</h1>
+      <div class="sub">Drop an image here, or click to open</div>
+      <div class="hint">
+        <span>Drag to pan</span>
+        <span class="sep"></span>
+        <span>Scroll to zoom</span>
+        <span class="sep"></span>
+        <span>Focal length auto-detected from EXIF</span>
+      </div>
+    </div>
+
+    <!-- Bottom status bar — orientation + meta readout (desktop) -->
+    <div class="bottom-readout desktop-only">
+      <div class="br-cell"><span class="k">Yaw</span><span class="v" id="v-yaw">0.0°</span></div>
+      <div class="br-cell"><span class="k">Pitch</span><span class="v" id="v-pitch">0.0°</span></div>
+      <div class="br-cell"><span class="k">Roll</span><span class="v" id="v-roll">0.0°</span></div>
+      <div class="br-sep"></div>
+      <div class="br-cell"><span class="k">Focal</span><span class="v" id="v-focal">— mm</span></div>
+      <div class="br-cell"><span class="k">Projection</span><span class="v" id="v-proj">Rectilinear</span></div>
+      <div class="br-spacer"></div>
+      <div class="br-cell"><span class="k">Export</span><span class="v" id="v-export">— × — px</span></div>
+    </div>
+  </main>
+
+  <!-- ============================================================
+       SIDEBAR (right on desktop, bottom on mobile)
+       ============================================================ -->
+  <aside class="sidebar">
+
+    <!-- ---- Desktop header ---- -->
+    <div class="sidebar-header desktop-only">
+      <div class="logo-mark"></div>
+      <div class="brand">Reprojection</div>
+      <div class="filename" id="filename-label">No image loaded</div>
+      <button class="help-btn" id="help-toggle" title="Keyboard shortcuts">?</button>
+    </div>
+
+    <div class="sidebar-body">
+
+      <!-- ============== DESKTOP SECTIONS ============== -->
+
+      <!-- Lens -->
+      <div class="section desktop-only">
+        <div class="section-header">Lens</div>
+        <div class="section-body">
+          <div class="row">
+            <span class="label">35mm equivalent</span>
+            <input type="number" id="f35" min="4" max="2000" step="1" value="50">
+            <button class="btn" id="apply-btn">Apply</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Projection -->
+      <div class="section desktop-only">
+        <div class="section-header">Projection</div>
+        <div class="section-body">
+          <div class="slider-wrap">
+            <div class="slider-labels">
+              <span>Rectilinear</span>
+              <span>Equidistant</span>
+            </div>
+            <div class="slider-row">
+              <input type="range" id="fisheye-k" min="0" max="1" step="0.01" value="0">
+              <span class="slider-value" id="v-fisheye">0%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Crop -->
+      <div class="section desktop-only">
+        <div class="section-header">Crop</div>
+        <div class="section-body">
+          <div class="row">
+            <span class="label" style="flex:none">Aspect ratio</span>
+            <select id="frame-ratio" style="flex:1">
+              <option value="original">Original</option>
+              <option value="freeform">Free form</option>
+              <option value="1:1">1:1 Square</option>
+              <optgroup label="Landscape">
+                <option value="16:9">16:9</option>
+                <option value="4:3">4:3</option>
+                <option value="3:2">3:2</option>
+                <option value="5:4">5:4</option>
+                <option value="21:9">21:9 Ultrawide</option>
+                <option value="2.39:1">2.39:1 Cinema</option>
+              </optgroup>
+              <optgroup label="Portrait">
+                <option value="9:16">9:16</option>
+                <option value="3:4">3:4</option>
+                <option value="2:3">2:3</option>
+                <option value="4:5">4:5</option>
+                <option value="9:21">9:21 Tall</option>
+              </optgroup>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- View -->
+      <div class="section desktop-only">
+        <div class="section-header">View</div>
+        <div class="section-body">
+          <button class="btn btn-block" id="reset-btn">Reset view</button>
+        </div>
+      </div>
+
+      <!-- ============== MOBILE COMPACT ============== -->
+      <div class="mobile-only m-stack">
+
+        <div class="m-section">
+          <div class="m-slider-row">
+            <span class="m-label">Projection</span>
+            <input type="range" id="fisheye-k-m" min="0" max="1" step="0.01" value="0">
+            <span class="m-value" id="v-fisheye-m">0%</span>
+          </div>
+        </div>
+
+        <div class="m-section">
+          <div class="m-grid">
+            <div class="m-cell">
+              <span class="m-label">Focal (mm)</span>
+              <input type="number" id="f35-m" min="4" max="2000" step="1" value="50">
+            </div>
+            <div class="m-cell">
+              <span class="m-label">Ratio</span>
+              <select id="frame-ratio-m">
+                <option value="original">Original</option>
+                <option value="freeform">Free</option>
+                <option value="1:1">1:1</option>
+                <option value="16:9">16:9</option>
+                <option value="4:3">4:3</option>
+                <option value="3:2">3:2</option>
+                <option value="5:4">5:4</option>
+                <option value="21:9">21:9</option>
+                <option value="2.39:1">2.39:1</option>
+                <option value="9:16">9:16</option>
+                <option value="3:4">3:4</option>
+                <option value="2:3">2:3</option>
+                <option value="4:5">4:5</option>
+              </select>
+            </div>
+            <div class="m-cell">
+              <span class="m-label">&nbsp;</span>
+              <button class="btn" id="reset-btn-m">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="m-section" style="margin-top:auto">
+          <div class="m-actions">
+            <button class="btn" id="open-btn-m">Open</button>
+            <button class="btn btn-primary" id="export-btn-m">Export</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.sidebar-body -->
+
+    <!-- ---- Desktop footer ---- -->
+    <div class="sidebar-footer desktop-only">
+      <div class="btn-row">
+        <button class="btn" id="open-btn">Open image</button>
+        <button class="btn btn-primary" id="export-btn">Export frame</button>
+      </div>
+    </div>
+
+  </aside>
 </div>
 
-<div id="drop-zone">
-  <h1>Reprojection</h1>
-  <p>Drop an image here, or click to open</p>
-  <p>Focal length auto-detected from EXIF</p>
-  <div class="hint">
-    Arrow keys: pan &nbsp;|&nbsp; [ ] roll &nbsp;|&nbsp; scroll: zoom<br>
-    Mouse drag: pan &nbsp;|&nbsp; R: reset
+<!-- Keyboard shortcuts overlay -->
+<div class="help-overlay" id="help-overlay">
+  <div class="help-card">
+    <h3>Keyboard &amp; Mouse</h3>
+    <div class="help-list">
+      <kbd>← → ↑ ↓</kbd><span class="desc">Pan view</span>
+      <kbd>Drag</kbd><span class="desc">Pan view</span>
+      <kbd>Scroll</kbd><span class="desc">Zoom</span>
+      <kbd>[ &nbsp; ]</kbd><span class="desc">Roll</span>
+      <kbd>Shift+Scroll</kbd><span class="desc">Roll</span>
+      <kbd>Alt+Scroll</kbd><span class="desc">Projection blend</span>
+      <kbd>− &nbsp; =</kbd><span class="desc">Zoom out / in</span>
+      <kbd>R</kbd><span class="desc">Reset view</span>
+    </div>
   </div>
 </div>
 
-<div id="help" class="panel hidden">
-  Arrow keys &nbsp; Pan<br>
-  [ ] &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Roll<br>
-  Scroll / -= &nbsp; Zoom<br>
-  Drag mouse &nbsp; Pan<br>
-  R &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Reset
-</div>
-
-<div id="hud" class="panel hidden"></div>
-
-<div id="ctrl" class="panel hidden">
-  <div class="ctrl-row" style="color:#888">
-    <span style="flex:1">35mm equiv. focal length</span>
-  </div>
-  <div class="ctrl-row" style="margin-top:-4px">
-    <input type="number" id="f35" min="4" max="2000" step="1" value="50">mm
-    <button class="btn" id="apply-btn">Apply</button>
-  </div>
-  <div style="display:flex;justify-content:space-between;font-size:10px;color:#555;margin-top:6px">
-    <span>Perspective</span><span>Equidistant</span>
-  </div>
-  <input type="range" id="fisheye-k" min="0" max="1" step="0.01" value="0" style="width:100%;accent-color:#7af;margin:4px 0 8px;cursor:pointer">
-  <div class="ctrl-row">
-    <span style="color:#888;flex-shrink:0">Export ratio</span>
-    <select id="frame-ratio" style="flex:1;min-width:0">
-      <option value="original">Original</option>
-      <option value="freeform">Free form</option>
-      <option value="1:1">1:1 Square</option>
-      <optgroup label="Landscape">
-        <option value="16:9">16:9</option>
-        <option value="4:3">4:3</option>
-        <option value="3:2">3:2</option>
-        <option value="5:4">5:4</option>
-        <option value="21:9">21:9 Ultrawide</option>
-        <option value="2.39:1">2.39:1 Cinema</option>
-      </optgroup>
-      <optgroup label="Portrait">
-        <option value="9:16">9:16</option>
-        <option value="3:4">3:4</option>
-        <option value="2:3">2:3</option>
-        <option value="4:5">4:5</option>
-        <option value="9:21">9:21 Tall</option>
-      </optgroup>
-    </select>
-    <button class="btn" id="reset-btn">Reset view</button>
-  </div>
-  <div class="ctrl-row">
-    <button class="btn" id="open-btn">Open image</button>
-    <button class="btn" id="export-btn">Export frame</button>
-  </div>
-</div>
+<!-- Legacy elements kept for backward-compat with JS -->
+<div id="hud"></div>
+<div id="help"></div>
 
 <input type="file" id="file-in" accept="image/*" style="display:none">
 
@@ -268,15 +861,29 @@ const gl = cv.getContext('webgl', { preserveDrawingBuffer: true })
         || cv.getContext('experimental-webgl', { preserveDrawingBuffer: true });
 if (!gl) { alert('WebGL not supported'); }
 
+// Sidebar/bar size — kept in sync with CSS
+const DESKTOP_SIDEBAR_W = 320;
+const DESKTOP_BOTTOM_H  = 26;
+const MOBILE_CTRL_H = 188;
+
+function viewW() {
+  return mobileQuery.matches ? window.innerWidth : Math.max(0, window.innerWidth - DESKTOP_SIDEBAR_W);
+}
+function viewH() {
+  return mobileQuery.matches
+    ? Math.max(0, window.innerHeight - MOBILE_CTRL_H)
+    : Math.max(0, window.innerHeight - DESKTOP_BOTTOM_H);
+}
+
 function resize() {
   const dpr = devicePixelRatio || 1;
-  const ctrlH = mobileQuery.matches ? 140 : 0;
-  cv.width  = Math.round(window.innerWidth  * dpr);
-  cv.height = Math.round((window.innerHeight - ctrlH) * dpr);
+  const w = viewW(), h = viewH();
+  cv.width  = Math.round(w * dpr);
+  cv.height = Math.round(h * dpr);
   gl.viewport(0, 0, cv.width, cv.height);
   const ch = document.getElementById('crosshair');
-  ch.style.left = (window.innerWidth / 2) + 'px';
-  ch.style.top  = ((window.innerHeight - ctrlH) / 2) + 'px';
+  ch.style.left = (w / 2) + 'px';
+  ch.style.top  = (h / 2) + 'px';
 }
 resize();
 
@@ -420,38 +1027,41 @@ function draw() {
 
 function fmtDeg(v) { return (v * 180 / Math.PI).toFixed(1) + '°'; }
 
+function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+
 function updateHUD() {
-  const f35eq = (fDst * 36 / Math.max(imgW, imgH)).toFixed(0);
-  const projLabel = fisheyeK === 0 ? 'Perspective' : fisheyeK === 1 ? 'Equidistant' : 'Fisheye ' + Math.round(fisheyeK * 100) + '%';
+  const f35eq = loaded ? (fDst * 36 / Math.max(imgW, imgH)).toFixed(0) : '\u2014';
+  const projLabel = fisheyeK === 0 ? 'Rectilinear'
+                  : fisheyeK === 1 ? 'Equidistant'
+                  : 'Blend ' + Math.round(fisheyeK * 100) + '%';
+  const fishPct = Math.round(fisheyeK * 100) + '%';
   const minPx = Math.min(imgW, imgH);
   const shortEdge = Math.min(frameImgW, frameImgH);
   const sc = shortEdge > 0 ? minPx / shortEdge : 1;
   const expW = Math.round(frameImgW * sc);
   const expH = Math.round(frameImgH * sc);
-  document.getElementById('hud').innerHTML =
-    'Yaw: ' + fmtDeg(yaw) + ' &nbsp; Pitch: ' + fmtDeg(pitch) + ' &nbsp; Roll: ' + fmtDeg(roll) + '<br>' +
-    'Focal: ' + f35eq + 'mm equiv &nbsp;&#183;&nbsp; src: ' + Math.round(fSrc) + 'px' + '<br>' +
-    'Projection: ' + projLabel + '<br>' +
-    'Export: ' + expW + ' &#215; ' + expH + 'px';
+
+  setText('v-yaw',   fmtDeg(yaw));
+  setText('v-pitch', fmtDeg(pitch));
+  setText('v-roll',  fmtDeg(roll));
+  setText('v-focal', loaded ? (f35eq + ' mm') : '\u2014 mm');
+  setText('v-proj',  projLabel);
+  setText('v-export', loaded ? (expW + ' \u00d7 ' + expH + ' px') : '\u2014 \u00d7 \u2014 px');
+  setText('v-fisheye',   fishPct);
+  setText('v-fisheye-m', fishPct);
 }
 
 // ---- Frame overlay ----------------------------------------------------------
 const frameEl = document.getElementById('frame-box');
 
-// Available viewport height (excludes mobile bottom bar)
-const MOBILE_CTRL_H = 140;
-function viewH() {
-  return window.innerHeight - (isMobileScreen() ? MOBILE_CTRL_H : 0);
-}
-
 // imgScale: CSS px per image px for current viewport
-function imgScale() { return Math.min(window.innerWidth / imgW, viewH() / imgH); }
+function imgScale() { return Math.min(viewW() / imgW, viewH() / imgH); }
 
 // Convert image-space frame to CSS and update DOM.
 // Called on every resize — no repositioning logic needed since frame is in image space.
 function positionFrame() {
   const s = imgScale();
-  const ww = window.innerWidth, wh = viewH();
+  const ww = viewW(), wh = viewH();
   frameEl.style.left    = (ww / 2 + frameImgX * s) + 'px';
   frameEl.style.top     = (wh / 2 + frameImgY * s) + 'px';
   frameEl.style.width   = (frameImgW * s) + 'px';
@@ -461,7 +1071,7 @@ function positionFrame() {
 
 function clampFrame() {
   const s = imgScale();
-  const ww = window.innerWidth, wh = viewH();
+  const ww = viewW(), wh = viewH();
   // Clamp so the centre of every corner handle stays inside the viewport.
   // Corners sit at (frameImgX, frameImgY), (frameImgX+frameImgW, frameImgY),
   // (frameImgX, frameImgY+frameImgH), (frameImgX+frameImgW, frameImgY+frameImgH).
@@ -492,7 +1102,7 @@ function applyRatioSnap() {
   const ratio = getTargetRatio();
   if (ratio <= 0) return; // freeform – keep current
   const s = imgScale();
-  const ww = window.innerWidth, wh = viewH();
+  const ww = viewW(), wh = viewH();
   const maxWi = (ww - 14) / s, maxHi = (wh - 14) / s;
   frameImgH = frameImgW / ratio;
   if (frameImgH > maxHi) { frameImgH = maxHi; frameImgW = frameImgH * ratio; }
@@ -858,9 +1468,9 @@ async function loadFile(file) {
     loaded = true;
     frameImgW = 0; // reset so updateFrame() re-initialises on next call
     document.getElementById('drop-zone').classList.add('hidden');
-    ['hud','ctrl','help'].forEach(id =>
-      document.getElementById(id).classList.remove('hidden'));
     document.getElementById('f35').value = Math.round(f35);
+    const f35m = document.getElementById('f35-m'); if (f35m) f35m.value = Math.round(f35);
+    const fl = document.getElementById('filename-label'); if (fl) fl.textContent = file.name;
     draw();
     updateHUD();
     updateFrame();
@@ -894,16 +1504,69 @@ document.getElementById('apply-btn').addEventListener('click', () => {
   const ratio = fDst / fSrc;
   fSrc = f * Math.max(imgW, imgH) / 36;
   fDst = fSrc * ratio;
+  const m = document.getElementById('f35-m'); if (m) m.value = Math.round(f);
   draw(); updateHUD();
 });
 document.getElementById('fisheye-k').addEventListener('input', e => {
   fisheyeK = parseFloat(e.target.value);
+  const m = document.getElementById('fisheye-k-m'); if (m) m.value = fisheyeK;
   draw(); updateHUD();
 });
 
 document.getElementById('frame-ratio').addEventListener('change', () => {
+  const m = document.getElementById('frame-ratio-m');
+  if (m) m.value = document.getElementById('frame-ratio').value;
   applyRatioSnap(); positionFrame(); updateHUD();
 });
+
+// ---- Mobile mirror controls ------------------------------------------------
+const fkM = document.getElementById('fisheye-k-m');
+if (fkM) fkM.addEventListener('input', e => {
+  fisheyeK = parseFloat(e.target.value);
+  document.getElementById('fisheye-k').value = fisheyeK;
+  draw(); updateHUD();
+});
+
+const f35M = document.getElementById('f35-m');
+if (f35M) f35M.addEventListener('change', () => {
+  const f = parseFloat(f35M.value);
+  if (!f || f <= 0) return;
+  document.getElementById('f35').value = f;
+  if (loaded) {
+    const ratio = fDst / fSrc;
+    fSrc = f * Math.max(imgW, imgH) / 36;
+    fDst = fSrc * ratio;
+    draw(); updateHUD();
+  }
+});
+
+const rM = document.getElementById('frame-ratio-m');
+if (rM) rM.addEventListener('change', () => {
+  document.getElementById('frame-ratio').value = rM.value;
+  applyRatioSnap(); positionFrame(); updateHUD();
+});
+
+const resetM = document.getElementById('reset-btn-m');
+if (resetM) resetM.addEventListener('click', () => { reset(); draw(); updateHUD(); });
+const openM = document.getElementById('open-btn-m');
+if (openM) openM.addEventListener('click', () => document.getElementById('file-in').click());
+const expM = document.getElementById('export-btn-m');
+if (expM) expM.addEventListener('click', exportFrame);
+
+// ---- Help overlay ----------------------------------------------------------
+const helpToggle = document.getElementById('help-toggle');
+const helpOverlay = document.getElementById('help-overlay');
+if (helpToggle && helpOverlay) {
+  helpToggle.addEventListener('click', () => helpOverlay.classList.toggle('show'));
+  helpOverlay.addEventListener('click', () => helpOverlay.classList.remove('show'));
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') helpOverlay.classList.remove('show');
+    if (e.key === '?' || (e.key === '/' && e.shiftKey)) helpOverlay.classList.toggle('show');
+  });
+}
+
+// Initialise HUD with defaults so sidebar isn't blank
+updateHUD();
 
 // ---- Frame handles ----------------------------------------------------------
 document.querySelectorAll('.frame-handle').forEach(handle => {
