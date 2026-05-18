@@ -46,7 +46,11 @@ html, body {
 .preview {
   flex: 1; min-width: 0;
   position: relative;
-  background: #0e0e0e;
+  background-color: #383838;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: 24px 24px;
   overflow: hidden;
 }
 .sidebar {
@@ -331,7 +335,45 @@ input[type="range"]::-moz-range-thumb {
 }
 input[type="range"]:active::-webkit-slider-thumb { cursor: grabbing; background: linear-gradient(180deg, #fff 0%, #d0d0d0 100%); }
 
-/* ---- HUD grid (orientation readout) ---- */
+/* ---- Toggle pill ---- */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  background: linear-gradient(180deg, #313131 0%, #272727 100%);
+  border: 1px solid #1a1a1a;
+  box-shadow: 0 0 0 1px #4a4a4a, inset 0 1px 0 rgba(255,255,255,0.04);
+  border-radius: 2px;
+  cursor: pointer;
+  user-select: none;
+  gap: 6px;
+  transition: background 0.12s;
+}
+.toggle:hover { background: linear-gradient(180deg, #3a3a3a 0%, #2e2e2e 100%); }
+.toggle input { appearance: none; -webkit-appearance: none; width: 0; height: 0; margin: 0; }
+.toggle .toggle-label {
+  font-size: 11px;
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+  position: relative;
+  padding-left: 16px;
+}
+.toggle .toggle-label::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  width: 10px; height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #1a1a1a;
+  box-shadow: 0 0 0 1px #3a3a3a, inset 0 1px 1px rgba(0,0,0,0.6);
+}
+.toggle input:checked ~ .toggle-label { color: var(--text-1); }
+.toggle input:checked ~ .toggle-label::before {
+  background: radial-gradient(circle, var(--accent-hi) 0%, var(--accent-lo) 80%);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 6px rgba(74,144,226,0.6);
+}
 .hud-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -749,6 +791,13 @@ body.mobile #drop-zone .hint { display: none; }
               </optgroup>
             </select>
           </div>
+          <div class="row" style="margin-top:8px">
+            <button class="btn" id="fit-btn" style="flex:1">Fit to image</button>
+            <label class="toggle" title="Continuously fit crop to valid pixels as the view changes">
+              <input type="checkbox" id="autofit-chk">
+              <span class="toggle-label">Auto</span>
+            </label>
+          </div>
         </div>
       </div>
 
@@ -796,14 +845,15 @@ body.mobile #drop-zone .hint { display: none; }
               </select>
             </div>
             <div class="m-cell">
-              <span class="m-label">&nbsp;</span>
-              <button class="btn" id="reset-btn-m">Reset</button>
+              <span class="m-label">Fit</span>
+              <button class="btn" id="fit-btn-m">Fit</button>
             </div>
           </div>
         </div>
 
         <div class="m-section" style="margin-top:auto">
           <div class="m-actions">
+            <button class="btn" id="reset-btn-m">Reset</button>
             <button class="btn" id="open-btn-m">Open</button>
             <button class="btn btn-primary" id="export-btn-m">Export</button>
           </div>
@@ -902,6 +952,7 @@ const FS = [
   'uniform mat3  uR;',    // rotation matrix
   'uniform float uSC;',   // canvas px per image px
   'uniform vec2  uCenter;', // image-px offset of viewport centre from scene centre
+  'uniform vec4  uBg;',   // background colour for invalid rays (premultiplied)
   'void main(){',
   '  vec2 s = (gl_FragCoord.xy - uRes*0.5) / uSC + uCenter;',
   '  float r = length(s);',
@@ -913,11 +964,11 @@ const FS = [
   '    dir = vec3((s / r) * sin(theta), cos(theta));',
   '  }',
   '  vec3 ray = uR * dir;',
-  '  if(ray.z <= 0.0){ gl_FragColor=vec4(0.06,0.06,0.06,1.); return; }',
+  '  if(ray.z <= 0.0){ gl_FragColor = uBg; return; }',
   '  vec2 hit = (uFS/ray.z)*ray.xy;',
   '  vec2 uv  = hit/uImg + 0.5;',
-  '  if(uv.x<0.||uv.x>1.||uv.y<0.||uv.y>1.){ gl_FragColor=vec4(0.06,0.06,0.06,1.); return; }',
-  '  gl_FragColor = texture2D(uTex, uv);',
+  '  if(uv.x<0.||uv.x>1.||uv.y<0.||uv.y>1.){ gl_FragColor = uBg; return; }',
+  '  gl_FragColor = vec4(texture2D(uTex, uv).rgb, 1.0);',
   '}'
 ].join('\n');
 
@@ -945,7 +996,7 @@ gl.enableVertexAttribArray(aLoc);
 gl.vertexAttribPointer(aLoc, 2, gl.FLOAT, false, 0, 0);
 
 const U = {};
-['uTex','uRes','uImg','uFS','uFD','uK','uR','uSC','uCenter'].forEach(n => { U[n] = gl.getUniformLocation(prog, n); });
+['uTex','uRes','uImg','uFS','uFD','uK','uR','uSC','uCenter','uBg'].forEach(n => { U[n] = gl.getUniformLocation(prog, n); });
 
 const tex = gl.createTexture();
 gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -1021,6 +1072,7 @@ function draw() {
   gl.uniformMatrix3fv(U.uR, false, rotMat(yaw, pitch, roll));
   gl.uniform1f(U.uSC, sc);
   gl.uniform2f(U.uCenter, 0, 0);
+  gl.uniform4f(U.uBg, 0, 0, 0, 0);   // transparent — reveals preview grid
   gl.uniform1i(U.uTex, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
@@ -1180,14 +1232,136 @@ function updateFrame() {
   positionFrame();
 }
 
-// ---- Keyboard ---------------------------------------------------------------
+// ---- Crop fit-to-valid-pixels --------------------------------------------
+//
+// Reproduces the fragment shader's back-projection on the CPU so we can ask
+// "is the output pixel at (sx, sy) — in image-px scene coordinates, the same
+// space frameImgX/Y/W/H live in — sampling a valid source UV?"
+//
+// frameImg Y is CSS-down; the shader's "s" Y is GL-up (gl_FragCoord). To match
+// the shader exactly we flip Y when feeding the CPU test (same convention the
+// export pipeline uses: cy = -(frameImgY + frameImgH/2)).
+function isValidOutput(sx, sy) {
+  // sy here is in shader/GL-up space already; callers flip Y.
+  const r = Math.hypot(sx, sy);
+  let dx, dy, dz;
+  if (r < 0.0001) { dx = 0; dy = 0; dz = 1; }
+  else {
+    const t1 = Math.atan(r / fDst);
+    const t2 = r / fDst;
+    const theta = (1 - fisheyeK) * t1 + fisheyeK * t2;
+    const st = Math.sin(theta), ct = Math.cos(theta);
+    dx = (sx / r) * st;
+    dy = (sy / r) * st;
+    dz = ct;
+  }
+  // Apply rotation matrix (column-major in _rotMat)
+  const m = rotMat(yaw, pitch, roll);
+  const rx = m[0] * dx + m[3] * dy + m[6] * dz;
+  const ry = m[1] * dx + m[4] * dy + m[7] * dz;
+  const rz = m[2] * dx + m[5] * dy + m[8] * dz;
+  if (rz <= 0) return false;
+  const hx = (fSrc / rz) * rx;
+  const hy = (fSrc / rz) * ry;
+  const ux = hx / imgW + 0.5;
+  const uy = hy / imgH + 0.5;
+  return ux >= 0 && ux <= 1 && uy >= 0 && uy <= 1;
+}
+
+// Test whether a candidate rectangle (image-px scene coords, CSS-down Y) is
+// entirely inside the valid region. Samples a dense-ish grid along its border.
+function rectIsValid(ix, iy, w, h, samples = 24) {
+  // Convert to shader-Y-up by negating Y axis.
+  // Walk the perimeter at `samples` density per edge plus a coarse interior grid.
+  const N = samples;
+  // Perimeter samples (corners + edges)
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const x1 = ix + t * w,       y1 = iy;
+    const x2 = ix + t * w,       y2 = iy + h;
+    const x3 = ix,               y3 = iy + t * h;
+    const x4 = ix + w,           y4 = iy + t * h;
+    if (!isValidOutput(x1, -y1)) return false;
+    if (!isValidOutput(x2, -y2)) return false;
+    if (!isValidOutput(x3, -y3)) return false;
+    if (!isValidOutput(x4, -y4)) return false;
+  }
+  // Coarse interior grid catches concave invalid pockets (rare but possible
+  // with strong fisheye blends near edges).
+  const M = 6;
+  for (let i = 1; i < M; i++) {
+    for (let j = 1; j < M; j++) {
+      const x = ix + (i / M) * w;
+      const y = iy + (j / M) * h;
+      if (!isValidOutput(x, -y)) return false;
+    }
+  }
+  return true;
+}
+
+let autofit = false;
+
+// Find the largest rectangle (centred on cx,cy, aspect = ratio (or current))
+// that fits inside the valid region. Updates frameImg* and refreshes overlay.
+function fitFrameToValid() {
+  if (!loaded) return false;
+  // Anchor: keep current frame centre if it's inside the valid region,
+  // otherwise fall back to (0,0).
+  let cx = frameImgX + frameImgW / 2;
+  let cy = frameImgY + frameImgH / 2;
+  if (frameImgW <= 0 || !isValidOutput(cx, -cy)) { cx = 0; cy = 0; }
+  if (!isValidOutput(cx, -cy)) { return false; } // even centre invalid
+
+  // Aspect ratio: prefer the selected ratio; for freeform use current frame
+  // ratio; for original use the image ratio.
+  const sel = document.getElementById('frame-ratio').value;
+  let ratio;
+  if (sel === 'freeform') ratio = (frameImgW > 0 && frameImgH > 0) ? (frameImgW / frameImgH) : (imgW / imgH);
+  else                     ratio = getTargetRatio() || (imgW / imgH);
+
+  // Binary search on half-width.
+  // Upper bound: a generous size — diagonal of the source image is a safe ceiling.
+  const diag = Math.hypot(imgW, imgH);
+  let lo = 0, hi = diag;
+  // First, find a confirmed upper bound where the rect is invalid.
+  for (let i = 0; i < 6; i++) {
+    const halfW = hi;
+    const halfH = halfW / ratio;
+    if (rectIsValid(cx - halfW, cy - halfH, halfW * 2, halfH * 2, 12)) {
+      // Even this huge rect is valid (unlikely) — accept and exit.
+      lo = hi; break;
+    } else break;
+  }
+  // Binary search the largest valid half-width.
+  for (let iter = 0; iter < 22; iter++) {
+    const mid = (lo + hi) / 2;
+    const halfH = mid / ratio;
+    if (rectIsValid(cx - mid, cy - halfH, mid * 2, halfH * 2, 16)) lo = mid;
+    else hi = mid;
+  }
+  const halfW = lo;
+  const halfH = halfW / ratio;
+  if (halfW < 4) return false;
+
+  frameImgW = halfW * 2;
+  frameImgH = halfH * 2;
+  frameImgX = cx - halfW;
+  frameImgY = cy - halfH;
+  positionFrame();
+  updateHUD();
+  return true;
+}
+
+function maybeAutofit() {
+  if (autofit && loaded) fitFrameToValid();
+}
 const held = new Set();
 
 document.addEventListener('keydown', e => {
   held.add(e.key);
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','-','=','[',']'].includes(e.key))
     e.preventDefault();
-  if (e.key === 'r' || e.key === 'R') { reset(); draw(); updateHUD(); }
+  if (e.key === 'r' || e.key === 'R') { reset(); draw(); updateHUD(); maybeAutofit(); }
 });
 document.addEventListener('keyup', e => held.delete(e.key));
 
@@ -1216,7 +1390,7 @@ document.addEventListener('mousemove', e => {
   dragX = e.clientX; dragY = e.clientY;
   yaw   -= dx * MOUSE_SENS;
   pitch -= dy * MOUSE_SENS;
-  draw(); updateHUD();
+  draw(); updateHUD(); maybeAutofit();
 });
 document.addEventListener('mouseup', () => {
   dragging = false; frameResizing = false; frameMoving = false;
@@ -1267,7 +1441,7 @@ cv.addEventListener('touchmove', e => {
     touchY = touch.clientY;
     yaw -= dx * TOUCH_PAN_SENS;
     pitch -= dy * TOUCH_PAN_SENS;
-    draw(); updateHUD();
+    draw(); updateHUD(); maybeAutofit();
     return;
   }
 
@@ -1283,7 +1457,7 @@ cv.addEventListener('touchmove', e => {
     touchMode = 'gesture';
     touchDistance = nextDistance;
     touchAngle = nextAngle;
-    draw(); updateHUD();
+    draw(); updateHUD(); maybeAutofit();
   }
 }, { passive: false });
 
@@ -1325,7 +1499,7 @@ cv.addEventListener('wheel', e => {
     // Vertical scroll = zoom
     fDst *= Math.exp(-e.deltaY * ZOOM_SENS);
   }
-  draw(); updateHUD();
+  draw(); updateHUD(); maybeAutofit();
 }, { passive: false });
 
 // ---- Animation loop ---------------------------------------------------------
@@ -1348,7 +1522,7 @@ let prevT = 0;
   if (held.has('-'))          { fDst *= Math.exp(-ZOOM_SPD * dt); moved = true; }
   if (held.has('='))          { fDst *= Math.exp( ZOOM_SPD * dt); moved = true; }
 
-  if (moved) { draw(); updateHUD(); }
+  if (moved) { draw(); updateHUD(); maybeAutofit(); }
 })();
 
 // ---- Export -----------------------------------------------------------------
@@ -1376,6 +1550,7 @@ function exportFrame() {
   gl.uniformMatrix3fv(U.uR, false, rotMat(yaw, pitch, roll));
   gl.uniform1f(U.uSC, sc_export);
   gl.uniform2f(U.uCenter, cx, cy);
+  gl.uniform4f(U.uBg, 0.06, 0.06, 0.06, 1.0);   // opaque dark grey for JPEG export
   gl.uniform1i(U.uTex, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -1505,18 +1680,20 @@ document.getElementById('apply-btn').addEventListener('click', () => {
   fSrc = f * Math.max(imgW, imgH) / 36;
   fDst = fSrc * ratio;
   const m = document.getElementById('f35-m'); if (m) m.value = Math.round(f);
-  draw(); updateHUD();
+  draw(); updateHUD(); maybeAutofit();
 });
 document.getElementById('fisheye-k').addEventListener('input', e => {
   fisheyeK = parseFloat(e.target.value);
   const m = document.getElementById('fisheye-k-m'); if (m) m.value = fisheyeK;
-  draw(); updateHUD();
+  draw(); updateHUD(); maybeAutofit();
 });
 
 document.getElementById('frame-ratio').addEventListener('change', () => {
   const m = document.getElementById('frame-ratio-m');
   if (m) m.value = document.getElementById('frame-ratio').value;
-  applyRatioSnap(); positionFrame(); updateHUD();
+  if (autofit) { fitFrameToValid(); }
+  else { applyRatioSnap(); positionFrame(); }
+  updateHUD();
 });
 
 // ---- Mobile mirror controls ------------------------------------------------
@@ -1524,7 +1701,7 @@ const fkM = document.getElementById('fisheye-k-m');
 if (fkM) fkM.addEventListener('input', e => {
   fisheyeK = parseFloat(e.target.value);
   document.getElementById('fisheye-k').value = fisheyeK;
-  draw(); updateHUD();
+  draw(); updateHUD(); maybeAutofit();
 });
 
 const f35M = document.getElementById('f35-m');
@@ -1543,7 +1720,20 @@ if (f35M) f35M.addEventListener('change', () => {
 const rM = document.getElementById('frame-ratio-m');
 if (rM) rM.addEventListener('change', () => {
   document.getElementById('frame-ratio').value = rM.value;
-  applyRatioSnap(); positionFrame(); updateHUD();
+  if (autofit) { fitFrameToValid(); }
+  else { applyRatioSnap(); positionFrame(); }
+  updateHUD();
+});
+
+// ---- Fit-to-image controls -------------------------------------------------
+const fitBtn = document.getElementById('fit-btn');
+if (fitBtn) fitBtn.addEventListener('click', () => fitFrameToValid());
+const fitBtnM = document.getElementById('fit-btn-m');
+if (fitBtnM) fitBtnM.addEventListener('click', () => fitFrameToValid());
+const autofitChk = document.getElementById('autofit-chk');
+if (autofitChk) autofitChk.addEventListener('change', () => {
+  autofit = autofitChk.checked;
+  if (autofit) fitFrameToValid();
 });
 
 const resetM = document.getElementById('reset-btn-m');
