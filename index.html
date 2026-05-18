@@ -1569,6 +1569,9 @@ function exportFrame() {
   if (hasPiexif) {
     try {
       const exif = structuredClone(loadedExifObj ?? EMPTY_EXIF);
+      // Canvas pixels are already correctly oriented (browser applied EXIF rotation on load),
+      // so reset Orientation to 1 to prevent viewers from rotating the export again.
+      exif['0th'][piexif.ImageIFD.Orientation] = 1;
       delete exif['Exif'][piexif.ExifIFD.FocalLength];
       delete exif['Exif'][piexif.ExifIFD.FocalLengthIn35mmFilm];
       if (fisheyeK === 0) {
