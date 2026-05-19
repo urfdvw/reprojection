@@ -1038,6 +1038,15 @@ function isMobileScreen() {
   return mobileQuery.matches;
 }
 
+function isMobileDevice() {
+  const ua = navigator.userAgent;
+  if (/Android|iPhone|iPod/i.test(ua)) return true;
+  // iPadOS 13+ reports as desktop Safari; detect by platform + touch
+  if (/iPad/i.test(ua)) return true;
+  if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+  return false;
+}
+
 function syncMobileUI() {
   document.body.classList.toggle('mobile', isMobileScreen());
   // --ctrl-h is a CSS constant (140px) defined on body.mobile; no JS measurement needed
@@ -1526,7 +1535,7 @@ let prevT = 0;
 })();
 
 // ---- Export -----------------------------------------------------------------
-function exportFrame() {
+async function exportFrame() {
   if (!loaded) return;
 
   const minPx = Math.min(imgW, imgH);
@@ -1565,7 +1574,8 @@ function exportFrame() {
   const baseName = loadedFileName.replace(/\.[^.]+$/, '');
   const downloadName = `${baseName}_${dt}.jpg`;
 
-  let downloadUrl = dataURL;
+  // Build JPEG blob (with EXIF if available, else raw)
+  let jpegBlob;
   if (hasPiexif) {
     try {
       const exif = structuredClone(loadedExifObj ?? EMPTY_EXIF);
@@ -1581,20 +1591,36 @@ function exportFrame() {
       }
       const exifBytes = piexif.dump(exif);
       const newJpeg = piexif.insert(exifBytes, atob(dataURL.split(',')[1]));
-      downloadUrl = URL.createObjectURL(new Blob(
-        [Uint8Array.from(newJpeg, c => c.charCodeAt(0))],
-        { type: 'image/jpeg' }
-      ));
+      jpegBlob = new Blob([Uint8Array.from(newJpeg, c => c.charCodeAt(0))], { type: 'image/jpeg' });
     } catch (_) {}
   }
+  if (!jpegBlob) {
+    const binary = atob(dataURL.split(',')[1]);
+    jpegBlob = new Blob([Uint8Array.from(binary, c => c.charCodeAt(0))], { type: 'image/jpeg' });
+  }
 
+  // On mobile devices prefer the native share sheet; fall back to download on error
+  if (isMobileDevice() && navigator.share) {
+    const file = new File([jpegBlob], downloadName, { type: 'image/jpeg' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: downloadName });
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return; // user cancelled — don't fall through to download
+        // other error: fall through to download
+      }
+    }
+  }
+
+  const blobUrl = URL.createObjectURL(jpegBlob);
   const a = document.createElement('a');
-  a.href = downloadUrl;
+  a.href = blobUrl;
   a.download = downloadName;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  if (downloadUrl !== dataURL) URL.revokeObjectURL(downloadUrl);
+  URL.revokeObjectURL(blobUrl);
 }
 
 // ---- Image loading ----------------------------------------------------------
