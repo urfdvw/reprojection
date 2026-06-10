@@ -1,6 +1,23 @@
 # Reprojection — Architecture
 
-Single-file web application (`index.html`). No build step, no framework. All logic is in one `<script>` block. The entire rendering pipeline runs on the GPU via WebGL.
+Multi-file web application. No build step, no framework. The entire rendering pipeline runs on the GPU via WebGL.
+
+## File structure
+
+The following list describes the files and their roles:
+
+- `index.html` -- HTML structure, links CSS and JS
+- `style.css` -- all visual styling
+- `js/state.js` -- application state, constants, layout helpers, utilities
+- `js/renderer.js` -- WebGL setup, shaders, draw(), rotMat(), updateHUD()
+- `js/frame.js` -- frame overlay positioning and crop-fit-to-valid-pixels
+- `js/input.js` -- keyboard, mouse, touch, scroll wheel, animation loop
+- `js/roll-slider.js` -- infinite roll slider widget (desktop only)
+- `js/export.js` -- JPEG export pipeline with EXIF injection
+- `js/loader.js` -- image loading and EXIF focal-length parsing
+- `js/controls.js` -- UI event wiring and initialisation (loaded last)
+
+JS files use plain `<script>` tags sharing the global scope (no modules, no build step). Load order matters: each file may reference globals from earlier files.
 
 ## External dependencies (CDN)
 
@@ -177,7 +194,10 @@ Frame geometry is always stored in image-pixel space. `positionFrame()` re-deriv
 Frame move/resize via touch is handled by a separate `document` `touchmove` listener (not the canvas one), mirroring the mouse architecture.
 
 ### Scroll wheel
-Vertical scroll = zoom (`fDst`). Shift+scroll or horizontal scroll = roll. Alt/Option+scroll = fisheye blend (`fisheyeK`), also syncs the `#fisheye-k` slider.
+Vertical scroll = zoom (`fDst`). Cmd/Ctrl+scroll = roll. Horizontal scroll (e.g. trackpad swipe) = roll. Alt/Option+scroll = fisheye blend (`fisheyeK`), also syncs the `#fisheye-k` slider.
+
+### Roll slider (desktop only)
+An infinite slider widget in the sidebar. Tick marks scroll past a fixed centre indicator as roll changes. Drag left/right to adjust roll proportionally. Double-click to reset roll to zero.
 
 ---
 

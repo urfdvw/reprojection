@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Reprojection</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+  <!-- ============================================================
+       PREVIEW (left on desktop, top on mobile)
+       ============================================================ -->
+  <main class="preview">
+    <canvas id="c"></canvas>
+    <div id="crosshair"></div>
+    <div id="frame-box">
+      <div class="frame-handle" data-dir="n"></div>
+      <div class="frame-handle" data-dir="s"></div>
+      <div class="frame-handle" data-dir="e"></div>
+      <div class="frame-handle" data-dir="w"></div>
+      <div class="frame-handle" data-dir="nw"></div>
+      <div class="frame-handle" data-dir="ne"></div>
+      <div class="frame-handle" data-dir="sw"></div>
+      <div class="frame-handle" data-dir="se"></div>
+    </div>
+
+    <div id="drop-zone">
+      <div class="dz-frame"></div>
+      <h1>Reprojection</h1>
+      <div class="sub">Drop an image here, or click to open</div>
+      <div class="hint">
+        <span>Drag to pan</span>
+        <span class="sep"></span>
+        <span>Scroll to zoom</span>
+        <span class="sep"></span>
+        <span>Focal length auto-detected from EXIF</span>
+      </div>
+    </div>
+
+    <!-- Bottom status bar (desktop) -->
+    <div class="bottom-readout desktop-only">
+      <div class="br-cell"><span class="k">Yaw</span><span class="v" id="v-yaw">0.0°</span></div>
+      <div class="br-cell"><span class="k">Pitch</span><span class="v" id="v-pitch">0.0°</span></div>
+      <div class="br-cell"><span class="k">Roll</span><span class="v" id="v-roll">0.0°</span></div>
+      <div class="br-sep"></div>
+      <div class="br-cell"><span class="k">Focal</span><span class="v" id="v-focal">— mm</span></div>
+      <div class="br-cell"><span class="k">Projection</span><span class="v" id="v-proj">Rectilinear</span></div>
+      <div class="br-spacer"></div>
+      <div class="br-cell"><span class="k">Export</span><span class="v" id="v-export">— × — px</span></div>
+    </div>
+  </main>
+
+  <!-- ============================================================
+       SIDEBAR (right on desktop, bottom on mobile)
+       ============================================================ -->
+  <aside class="sidebar">
+
+    <!-- Desktop header -->
+    <div class="sidebar-header desktop-only">
+      <div class="logo-mark"></div>
+      <div class="brand">Reprojection</div>
+      <div class="filename" id="filename-label">No image loaded</div>
+      <button class="help-btn" id="help-toggle" title="Keyboard shortcuts">?</button>
+    </div>
+
+    <div class="sidebar-body">
+
+      <!-- ============== DESKTOP SECTIONS ============== -->
+
+      <!-- Lens -->
+      <div class="section desktop-only">
+        <div class="section-header">Lens</div>
+        <div class="section-body">
+          <div class="row">
+            <span class="label">35mm equivalent</span>
+            <input type="number" id="f35" min="4" max="2000" step="1" value="50">
+            <button class="btn" id="apply-btn">Apply</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Projection -->
+      <div class="section desktop-only">
+        <div class="section-header">Projection</div>
+        <div class="section-body">
+          <div class="slider-wrap">
+            <div class="slider-labels">
+              <span>Rectilinear</span>
+              <span>Equidistant</span>
+            </div>
+            <div class="slider-row">
+              <input type="range" id="fisheye-k" min="0" max="1" step="0.01" value="0">
+              <span class="slider-value" id="v-fisheye">0%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Crop -->
+      <div class="section desktop-only">
+        <div class="section-header">Crop</div>
+        <div class="section-body">
+          <div class="row">
+            <span class="label" style="flex:none">Aspect ratio</span>
+            <select id="frame-ratio" style="flex:1">
+              <option value="original">Original</option>
+              <option value="freeform">Free form</option>
+              <option value="1:1">1:1 Square</option>
+              <optgroup label="Landscape">
+                <option value="16:9">16:9</option>
+                <option value="4:3">4:3</option>
+                <option value="3:2">3:2</option>
+                <option value="5:4">5:4</option>
+                <option value="21:9">21:9 Ultrawide</option>
+                <option value="2.39:1">2.39:1 Cinema</option>
+              </optgroup>
+              <optgroup label="Portrait">
+                <option value="9:16">9:16</option>
+                <option value="3:4">3:4</option>
+                <option value="2:3">2:3</option>
+                <option value="4:5">4:5</option>
+                <option value="9:21">9:21 Tall</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <button class="btn" id="fit-btn" style="flex:1">Fit to image</button>
+            <label class="toggle" title="Continuously fit crop to valid pixels as the view changes">
+              <input type="checkbox" id="autofit-chk">
+              <span class="toggle-label">Auto</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Roll -->
+      <div class="section desktop-only">
+        <div class="section-header">Roll</div>
+        <div class="section-body">
+          <div class="roll-slider" id="roll-slider">
+            <canvas class="roll-slider-ticks" id="roll-slider-ticks"></canvas>
+            <div class="roll-slider-ping"></div>
+            <div class="roll-slider-value" id="roll-slider-value">0.0°</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- View -->
+      <div class="section desktop-only">
+        <div class="section-header">View</div>
+        <div class="section-body">
+          <button class="btn btn-block" id="reset-btn">Reset view</button>
+        </div>
+      </div>
+
+      <!-- ============== MOBILE COMPACT ============== -->
+      <div class="mobile-only m-stack">
+
+        <div class="m-section">
+          <div class="m-slider-row">
+            <span class="m-label">Projection</span>
+            <input type="range" id="fisheye-k-m" min="0" max="1" step="0.01" value="0">
+            <span class="m-value" id="v-fisheye-m">0%</span>
+          </div>
+        </div>
+
+        <div class="m-section">
+          <div class="m-grid">
+            <div class="m-cell">
+              <span class="m-label">Focal (mm)</span>
+              <input type="number" id="f35-m" min="4" max="2000" step="1" value="50">
+            </div>
+            <div class="m-cell">
+              <span class="m-label">Ratio</span>
+              <select id="frame-ratio-m">
+                <option value="original">Original</option>
+                <option value="freeform">Free</option>
+                <option value="1:1">1:1</option>
+                <option value="16:9">16:9</option>
+                <option value="4:3">4:3</option>
+                <option value="3:2">3:2</option>
+                <option value="5:4">5:4</option>
+                <option value="21:9">21:9</option>
+                <option value="2.39:1">2.39:1</option>
+                <option value="9:16">9:16</option>
+                <option value="3:4">3:4</option>
+                <option value="2:3">2:3</option>
+                <option value="4:5">4:5</option>
+              </select>
+            </div>
+            <div class="m-cell">
+              <span class="m-label">Fit</span>
+              <button class="btn" id="fit-btn-m">Fit</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="m-section" style="margin-top:auto">
+          <div class="m-actions">
+            <button class="btn" id="reset-btn-m">Reset</button>
+            <button class="btn" id="open-btn-m">Open</button>
+            <button class="btn btn-primary" id="export-btn-m">Export</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /.sidebar-body -->
+
+    <!-- Desktop footer -->
+    <div class="sidebar-footer desktop-only">
+      <div class="btn-row">
+        <button class="btn" id="open-btn">Open image</button>
+        <button class="btn btn-primary" id="export-btn">Export frame</button>
+      </div>
+    </div>
+
+  </aside>
+</div>
+
+<!-- Keyboard shortcuts overlay -->
+<div class="help-overlay" id="help-overlay">
+  <div class="help-card">
+    <h3>Keyboard &amp; Mouse</h3>
+    <div class="help-list">
+      <kbd>← → ↑ ↓</kbd><span class="desc">Pan view</span>
+      <kbd>Drag</kbd><span class="desc">Pan view</span>
+      <kbd>Scroll</kbd><span class="desc">Zoom</span>
+      <kbd>[ &nbsp; ]</kbd><span class="desc">Roll</span>
+      <kbd>⌘/Ctrl+Scroll</kbd><span class="desc">Roll</span>
+      <kbd>Alt+Scroll</kbd><span class="desc">Projection blend</span>
+      <kbd>− &nbsp; =</kbd><span class="desc">Zoom out / in</span>
+      <kbd>R</kbd><span class="desc">Reset view</span>
+    </div>
+  </div>
+</div>
+
+<!-- Legacy elements kept for backward-compat with JS -->
+<div id="hud"></div>
+<div id="help"></div>
+
+<input type="file" id="file-in" accept="image/*" style="display:none">
+
+<!-- External dependencies (CDN, optional at runtime) -->
+<script src="https://cdn.jsdelivr.net/npm/exifr@7/dist/lite.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/piexifjs/piexif.js"></script>
+
+<!-- Application scripts (order matters: each may depend on earlier ones) -->
+<script src="js/state.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/frame.js"></script>
+<script src="js/input.js"></script>
+<script src="js/roll-slider.js"></script>
+<script src="js/export.js"></script>
+<script src="js/loader.js"></script>
+<script src="js/controls.js"></script>
+</body>
+</html>
